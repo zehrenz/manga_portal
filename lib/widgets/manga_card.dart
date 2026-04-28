@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
@@ -17,6 +19,9 @@ class MangaCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final localCoverPath = manga.coverArt?.fileName;
+    final hasLocalCover = localCoverPath != null &&
+        (localCoverPath.startsWith('/') || localCoverPath.startsWith('file:'));
     final coverUrl = manga.coverUrl(256);
 
     return GestureDetector(
@@ -27,20 +32,33 @@ class MangaCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Expanded(
-              child: coverUrl != null
+              child: hasLocalCover
                   ? Image(
-                      image: CachedNetworkImageProvider(coverUrl),
+                      image: FileImage(
+                        File(
+                          localCoverPath.startsWith('file:')
+                              ? Uri.parse(localCoverPath).toFilePath()
+                              : localCoverPath,
+                        ),
+                      ),
                       fit: BoxFit.cover,
-                      frameBuilder: (context, child, frame, sync) {
-                        if (sync || frame != null) return child;
-                        return const ColoredBox(
-                          color: Colors.black26,
-                          child: Center(child: CircularProgressIndicator()),
-                        );
-                      },
                       errorBuilder: (_, __, ___) => const _PlaceholderCover(),
                     )
-                  : const _PlaceholderCover(),
+                  : coverUrl != null
+                      ? Image(
+                          image: CachedNetworkImageProvider(coverUrl),
+                          fit: BoxFit.cover,
+                          frameBuilder: (context, child, frame, sync) {
+                            if (sync || frame != null) return child;
+                            return const ColoredBox(
+                              color: Colors.black26,
+                              child: Center(child: CircularProgressIndicator()),
+                            );
+                          },
+                          errorBuilder: (_, __, ___) =>
+                              const _PlaceholderCover(),
+                        )
+                      : const _PlaceholderCover(),
             ),
             Padding(
               padding: const EdgeInsets.all(8),

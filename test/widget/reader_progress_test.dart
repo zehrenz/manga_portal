@@ -7,6 +7,7 @@ import 'package:manga_portal/models/chapter.dart';
 import 'package:manga_portal/models/chapter_pages.dart';
 import 'package:manga_portal/pages/reader_page.dart';
 import 'package:manga_portal/providers/api_providers.dart';
+import 'package:manga_portal/services/download_service.dart';
 import 'package:manga_portal/services/local_progress.dart';
 
 // ── Fake data ─────────────────────────────────────────────────────────────────
@@ -207,6 +208,48 @@ void main() {
       final progress = await testDb.getProgress(_testMangaId);
       expect(progress.chapterId, _ch1Id);
       expect(progress.pageIndex, greaterThan(0));
+    });
+
+    testWidgets('uses downloaded pages when chapter is available offline',
+        (tester) async {
+      final testDb = AppDatabase.forTesting();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            // If ReaderPage incorrectly prefers network, this forced error would
+            // render the load failure UI. Offline branch should bypass it.
+            atHomeServerProvider(_ch1Id).overrideWith(
+              (ref) async => throw Exception('network disabled for test'),
+            ),
+            chapterFeedProvider(_testMangaId).overrideWith(
+              (ref) async => _fakeChapters(),
+            ),
+            appDatabaseProvider.overrideWith((ref) => testDb),
+            localProgressServiceProvider.overrideWith((ref) async {
+              return LocalProgressService.create(testDb);
+            }),
+            downloadedChapterProvider(_ch1Id).overrideWith(
+              (ref) async => const DownloadedChapter(
+                chapterId: _ch1Id,
+                pages: ['/tmp/offline-page-1.png'],
+              ),
+            ),
+          ],
+          child: const MaterialApp(
+            home: ReaderPage(chapterId: _ch1Id, mangaId: _testMangaId),
+          ),
+        ),
+      );
+      await settle(tester);
+
+      await tester.tapAt(const Offset(400, 300));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump();
+
+      expect(find.text('1 / 1'), findsOneWidget);
+      expect(find.textContaining('Could not load chapter'), findsNothing);
     });
   });
 

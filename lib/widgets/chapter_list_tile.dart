@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/chapter.dart';
+import '../providers/api_providers.dart';
 
 /// Reading state for a chapter group, used to style the corresponding tile.
 enum ChapterReadState {
@@ -27,12 +29,14 @@ enum ChapterReadState {
 class ChapterListTile extends StatefulWidget {
   const ChapterListTile({
     super.key,
+    required this.mangaId,
     required this.chapters,
     required this.preferredLanguage,
     required this.onChapterSelected,
     this.readState = ChapterReadState.unread,
   });
 
+  final String mangaId;
   final List<Chapter> chapters;
   final String preferredLanguage;
   final void Function(String chapterId) onChapterSelected;
@@ -64,6 +68,7 @@ class _ChapterListTileState extends State<ChapterListTile> {
 
     if (preferred.length == 1) {
       return _SingleGroupTile(
+        mangaId: widget.mangaId,
         label: title,
         chapter: preferred.first,
         readState: widget.readState,
@@ -72,6 +77,7 @@ class _ChapterListTileState extends State<ChapterListTile> {
     }
 
     return _MultiGroupTile(
+      mangaId: widget.mangaId,
       label: title,
       chapters: preferred,
       readState: widget.readState,
@@ -113,12 +119,14 @@ String _formatDate(String? isoDate) {
 
 class _SingleGroupTile extends StatelessWidget {
   const _SingleGroupTile({
+    required this.mangaId,
     required this.label,
     required this.chapter,
     required this.onTap,
     this.readState = ChapterReadState.unread,
   });
 
+  final String mangaId;
   final String label;
   final Chapter chapter;
   final VoidCallback onTap;
@@ -149,9 +157,12 @@ class _SingleGroupTile extends StatelessWidget {
               style: isRead ? TextStyle(color: dimColor) : null,
             )
           : null,
-      trailing: isRead
-          ? Icon(Icons.check_circle_outline, color: dimColor, size: 20)
-          : const Icon(Icons.chevron_right),
+      trailing: _ChapterDownloadAction(
+        mangaId: mangaId,
+        chapter: chapter,
+        dimColor: dimColor,
+        readState: readState,
+      ),
       onTap: onTap,
     );
 
@@ -177,6 +188,7 @@ class _SingleGroupTile extends StatelessWidget {
 
 class _MultiGroupTile extends StatelessWidget {
   const _MultiGroupTile({
+    required this.mangaId,
     required this.label,
     required this.chapters,
     required this.expanded,
@@ -185,6 +197,7 @@ class _MultiGroupTile extends StatelessWidget {
     this.readState = ChapterReadState.unread,
   });
 
+  final String mangaId;
   final String label;
   final List<Chapter> chapters;
   final bool expanded;
@@ -246,7 +259,12 @@ class _MultiGroupTile extends StatelessWidget {
                         ),
                         subtitle:
                             Text(_formatDate(chapter.attributes.publishAt)),
-                        trailing: const Icon(Icons.chevron_right),
+                        trailing: _ChapterDownloadAction(
+                          mangaId: mangaId,
+                          chapter: chapter,
+                          dimColor: dimColor,
+                          readState: readState,
+                        ),
                         onTap: () => onChapterSelected(chapter.id),
                       ),
                   ],
@@ -291,5 +309,152 @@ class _UnavailableTile extends StatelessWidget {
       ),
       enabled: false,
     );
+  }
+}
+
+class _ChapterDownloadAction extends ConsumerStatefulWidget {
+  const _ChapterDownloadAction({
+    required this.mangaId,
+    required this.chapter,
+    required this.dimColor,
+    required this.readState,
+  });
+
+  final String mangaId;
+  final Chapter chapter;
+  final Color dimColor;
+  final ChapterReadState readState;
+
+  @override
+  ConsumerState<_ChapterDownloadAction> createState() =>
+      _ChapterDownloadActionState();
+}
+
+class _ChapterDownloadActionState
+    extends ConsumerState<_ChapterDownloadAction> {
+  bool _isStartingDownload = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final statusAsync = ref.watch(
+      chapterDownloadStatusProvider(widget.mangaId, widget.chapter.id),
+    );
+
+    return statusAsync.when(
+      loading: () => _buildSpinner(),
+      error: (_, __) => _buildCircleButton(
+        tooltip: 'Download chapter',
+        icon: Icons.download_outlined,
+        onPressed: () => _download(context),
+      ),
+      data: (status) {
+        if (_isStartingDownload) return _buildSpinner();
+        return switch (status.status) {
+          'completed' => _buildCircleButton(
+              tooltip: 'Remove download',
+              icon: Icons.check,
+              onPressed: () => _remove(context),
+              backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+              iconColor: Theme.of(context).colorScheme.primary,
+            ),
+          'downloading' || 'queued' => _buildSpinner(
+              value: status.progress <= 0 ? null : status.progress / 100,
+            ),
+          _ => _buildCircleButton(
+              tooltip: 'Download chapter',
+              icon: Icons.download_outlined,
+              onPressed: () => _download(context),
+              backgroundColor:
+                  Theme.of(context).colorScheme.surfaceContainerHighest,
+            ),
+        };
+      },
+    );
+  }
+
+  Widget _buildSpinner({double? value}) {
+    return SizedBox(
+      width: 36,
+      height: 36,
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          value: value,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCircleButton({
+    required String tooltip,
+    required IconData icon,
+    required VoidCallback onPressed,
+    Color? backgroundColor,
+    Color? iconColor,
+  }) {
+    return SizedBox(
+      width: 36,
+      height: 36,
+      child: IconButton(
+        tooltip: tooltip,
+        style: IconButton.styleFrom(
+          padding: EdgeInsets.zero,
+          backgroundColor: backgroundColor,
+          shape: const CircleBorder(),
+        ),
+        onPressed: onPressed,
+        icon: Icon(icon, size: 18, color: iconColor),
+      ),
+    );
+  }
+
+  Future<void> _download(BuildContext context) async {
+    setState(() => _isStartingDownload = true);
+    try {
+      await ref.read(downloadServiceProvider).downloadChapter(
+            mangaId: widget.mangaId,
+            chapterId: widget.chapter.id,
+          );
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          const SnackBar(content: Text('Chapter downloaded.')),
+        );
+      ref.invalidate(
+          chapterDownloadStatusProvider(widget.mangaId, widget.chapter.id));
+      ref.invalidate(downloadedChapterProvider(widget.chapter.id));
+      ref.invalidate(downloadedChapterIdsForMangaProvider(widget.mangaId));
+      ref.invalidate(downloadedBytesForMangaProvider(widget.mangaId));
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          const SnackBar(content: Text('Could not download chapter.')),
+        );
+    } finally {
+      if (mounted) {
+        setState(() => _isStartingDownload = false);
+      }
+    }
+  }
+
+  Future<void> _remove(BuildContext context) async {
+    await ref
+        .read(downloadServiceProvider)
+        .removeChapterDownload(widget.chapter.id);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        const SnackBar(content: Text('Download removed.')),
+      );
+    ref.invalidate(
+        chapterDownloadStatusProvider(widget.mangaId, widget.chapter.id));
+    ref.invalidate(downloadedChapterProvider(widget.chapter.id));
+    ref.invalidate(downloadedChapterIdsForMangaProvider(widget.mangaId));
+    ref.invalidate(downloadedBytesForMangaProvider(widget.mangaId));
   }
 }

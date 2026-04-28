@@ -13,13 +13,28 @@
 ///   6. Opening a chapter without paging doesn't steal in-progress state.
 ///   7. Clearing history from Settings resets all progress.
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:manga_portal/app.dart' show goRouter;
 import 'package:manga_portal/main.dart' as app;
+
+Future<void> _clearTestStorage() async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.clear();
+
+  final dir = await getApplicationDocumentsDirectory();
+  final dbFile = File(p.join(dir.path, 'manga_portal.sqlite'));
+  if (await dbFile.exists()) {
+    await dbFile.delete();
+  }
+}
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -37,8 +52,7 @@ void main() {
   // Clear all reading progress before each test so SharedPreferences state
   // from one test never affects the starting conditions of the next.
   setUp(() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.clear();
+    await _clearTestStorage();
   });
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -251,5 +265,31 @@ void main() {
 
     // Progress cleared — button should say "Start Ch. 1" again.
     expect(find.textContaining('Start Ch. 1'), findsOneWidget);
+  });
+
+  testWidgets('download chapter action shows progress then completed state',
+      (tester) async {
+    await openDetailPage(tester);
+
+    // Trigger download on the first available chapter row.
+    await tester.tap(find.byTooltip('Download chapter').first);
+    await tester.pump();
+
+    // Immediate visual feedback that download was registered.
+    expect(find.byType(CircularProgressIndicator), findsWidgets);
+    await tester.pumpAndSettle();
+
+    // Wait for async chapter download to complete and icon to switch to
+    // completed state.
+    var completedVisible = false;
+    for (var i = 0; i < 30; i++) {
+      await tester.pump(const Duration(milliseconds: 300));
+      if (find.byTooltip('Remove download').evaluate().isNotEmpty) {
+        completedVisible = true;
+        break;
+      }
+    }
+
+    expect(completedVisible, isTrue);
   });
 }

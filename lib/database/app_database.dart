@@ -240,6 +240,132 @@ class AppDatabase extends _$AppDatabase {
     return select(readingModesTable).get();
   }
 
+  Future<void> upsertCachedManga({
+    required String mangaId,
+    required String title,
+    String? coverFileName,
+  }) {
+    return into(mangaTable).insertOnConflictUpdate(
+      MangaTableCompanion.insert(
+        id: mangaId,
+        title: title,
+        coverFileName: Value(coverFileName),
+        updatedAt: DateTime.now(),
+      ),
+    );
+  }
+
+  Future<MangaTableData?> getCachedManga(String mangaId) {
+    return (select(mangaTable)..where((t) => t.id.equals(mangaId)))
+        .getSingleOrNull();
+  }
+
+  Future<void> replaceCachedChapters(
+    String mangaId,
+    List<ChaptersTableCompanion> chapters,
+  ) async {
+    await transaction(() async {
+      await (delete(chaptersTable)..where((t) => t.mangaId.equals(mangaId)))
+          .go();
+      if (chapters.isNotEmpty) {
+        await batch((batch) => batch.insertAll(chaptersTable, chapters));
+      }
+    });
+  }
+
+  Future<List<ChaptersTableData>> getCachedChapters(String mangaId) {
+    return (select(chaptersTable)..where((t) => t.mangaId.equals(mangaId)))
+        .get();
+  }
+
+  Future<void> upsertDownloadJob({
+    required String chapterId,
+    required String mangaId,
+    required String status,
+    int progress = 0,
+    int downloadedBytes = 0,
+    int? totalBytes,
+    String? errorMessage,
+  }) {
+    return into(downloadJobsTable).insertOnConflictUpdate(
+      DownloadJobsTableCompanion.insert(
+        chapterId: chapterId,
+        mangaId: mangaId,
+        status: status,
+        progress: Value(progress),
+        downloadedBytes: Value(downloadedBytes),
+        totalBytes: Value(totalBytes),
+        errorMessage: Value(errorMessage),
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      ),
+    );
+  }
+
+  Future<DownloadJobsTableData?> getDownloadJob(String chapterId) {
+    return (select(downloadJobsTable)
+          ..where((t) => t.chapterId.equals(chapterId)))
+        .getSingleOrNull();
+  }
+
+  Stream<DownloadJobsTableData?> watchDownloadJob(String chapterId) {
+    return (select(downloadJobsTable)
+          ..where((t) => t.chapterId.equals(chapterId)))
+        .watchSingleOrNull();
+  }
+
+  Stream<List<DownloadJobsTableData>> watchDownloadJobsForManga(
+      String mangaId) {
+    return (select(downloadJobsTable)..where((t) => t.mangaId.equals(mangaId)))
+        .watch();
+  }
+
+  Future<List<DownloadJobsTableData>> getDownloadJobsForManga(String mangaId) {
+    return (select(downloadJobsTable)..where((t) => t.mangaId.equals(mangaId)))
+        .get();
+  }
+
+  Future<void> replaceDownloadedPages(
+    String chapterId,
+    List<DownloadedPagesTableCompanion> pages,
+  ) async {
+    await transaction(() async {
+      await (delete(downloadedPagesTable)
+            ..where((t) => t.chapterId.equals(chapterId)))
+          .go();
+      if (pages.isNotEmpty) {
+        await batch((batch) => batch.insertAll(downloadedPagesTable, pages));
+      }
+    });
+  }
+
+  Future<List<DownloadedPagesTableData>> getDownloadedPages(String chapterId) {
+    return (select(downloadedPagesTable)
+          ..where((t) => t.chapterId.equals(chapterId))
+          ..orderBy([(t) => OrderingTerm.asc(t.pageIndex)]))
+        .get();
+  }
+
+  Future<bool> hasDownloadedChapter(String chapterId) async {
+    final count = downloadedPagesTable.pageIndex.count();
+    final query = selectOnly(downloadedPagesTable)
+      ..addColumns([count])
+      ..where(downloadedPagesTable.chapterId.equals(chapterId));
+    final row = await query.getSingleOrNull();
+    return (row?.read(count) ?? 0) > 0;
+  }
+
+  Future<void> deleteDownload(String chapterId) async {
+    await transaction(() async {
+      await (delete(downloadedPagesTable)
+            ..where((t) => t.chapterId.equals(chapterId)))
+          .go();
+      await (delete(downloadJobsTable)
+            ..where((t) => t.chapterId.equals(chapterId)))
+          .go();
+    });
+  }
+
   Future<void> clearProgressData() async {
     await delete(mangaProgressTable).go();
     await delete(readChaptersTable).go();

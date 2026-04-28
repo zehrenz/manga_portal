@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -239,6 +241,29 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     }
   }
 
+  void _onLocalPageChanged(int viewIndex, List<String> localPages) {
+    final mangaPage = _mangaPageForViewIndex(viewIndex, localPages.length);
+
+    if (mangaPage >= 0 && mangaPage < localPages.length) {
+      setState(() {
+        _currentMangaPage = mangaPage;
+        _isOnTransitionPage = false;
+        _barsVisible = false;
+      });
+      if (mangaPage > 0) _hasUserPaged = true;
+      if (_hasUserPaged) _saveProgress(mangaPage);
+      _startLocalPreload(mangaPage, localPages);
+    } else {
+      setState(() {
+        _isOnTransitionPage = true;
+        _barsVisible = false;
+      });
+      if (viewIndex == _nextTransitionSlot(localPages.length)) {
+        _markCurrentChapterRead();
+      }
+    }
+  }
+
   void _startPreload(int index, AtHomeServer server) {
     final gen = ++_loadGeneration;
     final dataSaver = ref.read(imageQualityProvider) == 'data-saver';
@@ -288,6 +313,53 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     }
   }
 
+  void _startLocalPreload(int index, List<String> localPages) {
+    final gen = ++_loadGeneration;
+
+    const immediateAhead = 3;
+    const immediateBehind = 1;
+    for (var i = index - immediateBehind; i <= index + immediateAhead; i++) {
+      if (i < 0 || i >= localPages.length || i == index) continue;
+      precacheImage(
+        FileImage(File(localPages[i])),
+        context,
+        onError: (_, __) {},
+      );
+    }
+
+    _preloadLocalBackground(
+      gen,
+      index,
+      localPages,
+      skipStart: index - immediateBehind,
+      skipEnd: index + immediateAhead,
+    );
+  }
+
+  Future<void> _preloadLocalBackground(
+    int gen,
+    int startIndex,
+    List<String> localPages, {
+    required int skipStart,
+    required int skipEnd,
+  }) async {
+    final sorted = List.generate(localPages.length, (i) => i)
+        .where((i) => i != startIndex && (i < skipStart || i > skipEnd))
+        .toList()
+      ..sort(
+        (a, b) => (a - startIndex).abs().compareTo((b - startIndex).abs()),
+      );
+
+    for (final i in sorted) {
+      if (_loadGeneration != gen || !mounted) return;
+      await precacheImage(
+        FileImage(File(localPages[i])),
+        context,
+        onError: (_, __) {},
+      );
+    }
+  }
+
   // ── Scroll mode progress tracking ──────────────────────────────────────────
 
   void _onScrollChanged() {
@@ -298,6 +370,29 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
 
     final maxExtent = _scrollController.position.maxScrollExtent;
     if (maxExtent <= 0) return;
+
+    final localPages = ref
+        .read(downloadedChapterProvider(_currentChapterId))
+        .valueOrNull
+        ?.pages;
+    if (localPages != null && localPages.isNotEmpty) {
+      final fraction = _scrollController.offset / maxExtent;
+      final estimatedPage = (fraction * (localPages.length - 1))
+          .round()
+          .clamp(0, localPages.length - 1);
+
+      if (estimatedPage != _currentMangaPage) {
+        setState(() => _currentMangaPage = estimatedPage);
+        if (estimatedPage > 0) _hasUserPaged = true;
+        if (_hasUserPaged) _saveProgress(estimatedPage);
+      }
+
+      if (!_scrollModeChapterRead && fraction >= 0.95) {
+        _scrollModeChapterRead = true;
+        _markCurrentChapterRead();
+      }
+      return;
+    }
 
     final server = _lastServer;
     if (server == null) return;
@@ -597,6 +692,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   @override
   Widget build(BuildContext context) {
     final serverAsync = ref.watch(atHomeServerProvider(_currentChapterId));
+    final downloadedAsync =
+        ref.watch(downloadedChapterProvider(_currentChapterId));
     final imageQuality = ref.watch(imageQualityProvider);
     final dataSaver = imageQuality == 'data-saver';
 
@@ -618,14 +715,19 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         ?.where((c) => c.id == _currentChapterId)
         .firstOrNull;
 
+    final downloadedChapter = downloadedAsync.valueOrNull;
+
     // Total pages from the live or last-known server.
-    final effectiveServer = serverAsync.valueOrNull ?? _lastServer;
-    final totalPages = effectiveServer != null
-        ? (dataSaver
-                ? effectiveServer.chapter.dataSaver
-                : effectiveServer.chapter.data)
-            .length
-        : 0;
+    final effectiveServer = downloadedChapter == null
+        ? (serverAsync.valueOrNull ?? _lastServer)
+        : null;
+    final totalPages = downloadedChapter?.pages.length ??
+        (effectiveServer != null
+            ? (dataSaver
+                    ? effectiveServer.chapter.dataSaver
+                    : effectiveServer.chapter.data)
+                .length
+            : 0);
 
     // Keep the same logical page when user switches LTR <-> RTL.
     // Without this remap, the same PageView slot would point at a different
@@ -645,49 +747,64 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     _lastReadingMode = readingMode;
 
     // Reader content (PageView / ListView / loading / error).
-    final Widget readerContent = serverAsync.when(
-      loading: () {
-        // Keep the reader content visible during a server URL refresh so the
-        // scroll/page position isn't lost. Only show the spinner on first load.
-        if (_lastServer case final server?) {
-          return isScrollMode
-              ? _buildScrollContent(server, dataSaver, chaptersAsync, settings)
-              : _buildPageViewContent(
-                  server, dataSaver, chaptersAsync, settings);
-        }
-        return const Center(
-            child: CircularProgressIndicator(color: Colors.white));
-      },
-      error: (error, _) => Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.cloud_off, size: 48, color: Colors.white54),
-            const SizedBox(height: 16),
-            Text(
-              'Could not load chapter.\nPlease check your connection.',
-              textAlign: TextAlign.center,
-              style: Theme.of(context)
-                  .textTheme
-                  .bodyMedium
-                  ?.copyWith(color: Colors.white70),
+    final Widget readerContent = downloadedChapter != null
+        ? (isScrollMode
+            ? _buildLocalScrollContent(
+                downloadedChapter.pages,
+                chaptersAsync,
+                settings,
+              )
+            : _buildLocalPageViewContent(
+                downloadedChapter.pages,
+                chaptersAsync,
+                settings,
+              ))
+        : serverAsync.when(
+            loading: () {
+              // Keep the reader content visible during a server URL refresh so the
+              // scroll/page position isn't lost. Only show the spinner on first load.
+              if (_lastServer case final server?) {
+                return isScrollMode
+                    ? _buildScrollContent(
+                        server, dataSaver, chaptersAsync, settings)
+                    : _buildPageViewContent(
+                        server, dataSaver, chaptersAsync, settings);
+              }
+              return const Center(
+                  child: CircularProgressIndicator(color: Colors.white));
+            },
+            error: (error, _) => Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.cloud_off, size: 48, color: Colors.white54),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Could not load chapter.\nPlease check your connection.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodyMedium
+                        ?.copyWith(color: Colors.white70),
+                  ),
+                  const SizedBox(height: 24),
+                  FilledButton(
+                    onPressed: () =>
+                        ref.invalidate(atHomeServerProvider(_currentChapterId)),
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 24),
-            FilledButton(
-              onPressed: () =>
-                  ref.invalidate(atHomeServerProvider(_currentChapterId)),
-              child: const Text('Retry'),
-            ),
-          ],
-        ),
-      ),
-      data: (server) {
-        _lastServer = server;
-        return isScrollMode
-            ? _buildScrollContent(server, dataSaver, chaptersAsync, settings)
-            : _buildPageViewContent(server, dataSaver, chaptersAsync, settings);
-      },
-    );
+            data: (server) {
+              _lastServer = server;
+              return isScrollMode
+                  ? _buildScrollContent(
+                      server, dataSaver, chaptersAsync, settings)
+                  : _buildPageViewContent(
+                      server, dataSaver, chaptersAsync, settings);
+            },
+          );
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -795,7 +912,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       itemCount: pages.length + 1, // +1 for the end-of-chapter footer
       itemBuilder: (context, index) {
         if (index < pages.length) {
-          return ReaderPageImage(
+          return ReaderPageImage.network(
             key: ValueKey('${_currentChapterId}_scroll_$index'),
             url: server.pageUrl(pages[index], dataSaver: dataSaver),
             isThirdParty: server.isThirdParty,
@@ -805,6 +922,42 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
           );
         }
         // Footer: end-of-chapter navigation (same content as paged transitions).
+        return SizedBox(
+          height: MediaQuery.of(context).size.height * 0.7,
+          child: _buildTransitionSlot(
+            isNext: true,
+            chaptersAsync: chaptersAsync,
+            preferredLanguage: settings.preferredLanguage,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildLocalScrollContent(
+    List<String> localPages,
+    AsyncValue<List<Chapter>> chaptersAsync,
+    Settings settings,
+  ) {
+    if (!_initialPreloadDone) {
+      _initialPreloadDone = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _startLocalPreload(0, localPages);
+      });
+    }
+
+    return ListView.builder(
+      controller: _scrollController,
+      cacheExtent: MediaQuery.of(context).size.height * 4,
+      itemCount: localPages.length + 1,
+      itemBuilder: (context, index) {
+        if (index < localPages.length) {
+          return ReaderPageImage.file(
+            key: ValueKey('${_currentChapterId}_scroll_local_$index'),
+            localFilePath: localPages[index],
+            onTap: _toggleBars,
+          );
+        }
         return SizedBox(
           height: MediaQuery.of(context).size.height * 0.7,
           child: _buildTransitionSlot(
@@ -861,12 +1014,61 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
           );
         } else {
           final pageIndex = _mangaPageForViewIndex(index, pages.length);
-          return ReaderPageImage(
+          return ReaderPageImage.network(
             key: ValueKey('${_currentChapterId}_${pages[pageIndex]}'),
             url: server.pageUrl(pages[pageIndex], dataSaver: dataSaver),
             isThirdParty: server.isThirdParty,
             apiService: ref.read(mangaDexApiServiceProvider),
             onLoadFailure: _onImageLoadFailure,
+            onTap: _toggleBars,
+          );
+        }
+      },
+    );
+  }
+
+  Widget _buildLocalPageViewContent(
+    List<String> localPages,
+    AsyncValue<List<Chapter>> chaptersAsync,
+    Settings settings,
+  ) {
+    if (!_initialPreloadDone) {
+      _initialPreloadDone = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        if (_pageController.hasClients) {
+          _pageController.jumpToPage(
+            _viewIndexForMangaPage(_currentMangaPage, localPages.length),
+          );
+        }
+        await _restoreProgress(localPages);
+        if (mounted) _startLocalPreload(_currentMangaPage, localPages);
+      });
+    }
+
+    return PageView.builder(
+      key: ValueKey(_pageViewKey),
+      controller: _pageController,
+      itemCount: localPages.length + 2,
+      onPageChanged: (index) => _onLocalPageChanged(index, localPages),
+      itemBuilder: (context, index) {
+        if (index == _prevTransitionSlot(localPages.length)) {
+          return _buildTransitionSlot(
+            isNext: false,
+            chaptersAsync: chaptersAsync,
+            preferredLanguage: settings.preferredLanguage,
+          );
+        } else if (index == _nextTransitionSlot(localPages.length)) {
+          return _buildTransitionSlot(
+            isNext: true,
+            chaptersAsync: chaptersAsync,
+            preferredLanguage: settings.preferredLanguage,
+          );
+        } else {
+          final pageIndex = _mangaPageForViewIndex(index, localPages.length);
+          return ReaderPageImage.file(
+            key: ValueKey('${_currentChapterId}_local_$pageIndex'),
+            localFilePath: localPages[pageIndex],
             onTap: _toggleBars,
           );
         }

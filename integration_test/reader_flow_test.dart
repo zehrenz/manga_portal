@@ -1,9 +1,24 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:manga_portal/main.dart' as app;
+
+Future<void> _clearTestStorage() async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.clear();
+
+  final dir = await getApplicationDocumentsDirectory();
+  final dbFile = File(p.join(dir.path, 'manga_portal.sqlite'));
+  if (await dbFile.exists()) {
+    await dbFile.delete();
+  }
+}
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -19,8 +34,7 @@ void main() {
   });
 
   setUp(() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.clear();
+    await _clearTestStorage();
   });
 
   testWidgets('navigates from Search to MangaDetailPage then to ReaderPage',

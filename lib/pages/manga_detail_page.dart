@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -24,6 +25,11 @@ class MangaDetailPage extends ConsumerWidget {
     final chaptersAsync = ref.watch(chapterFeedProvider(mangaId));
     final settings = ref.watch(settingsNotifierProvider);
     final progressAsync = ref.watch(localProgressServiceProvider);
+    final downloadedOnly = ref.watch(downloadedOnlyFilterProvider(mangaId));
+    final downloadedIdsAsync =
+        ref.watch(downloadedChapterIdsForMangaProvider(mangaId));
+    final downloadedBytesAsync =
+        ref.watch(downloadedBytesForMangaProvider(mangaId));
 
     // Current chapter the user is partway through (null when progress unknown).
     final currentChapterId = progressAsync.maybeWhen(
@@ -47,6 +53,10 @@ class MangaDetailPage extends ConsumerWidget {
       ),
       orElse: () => null,
     );
+
+    final downloadedChapterIds =
+        downloadedIdsAsync.valueOrNull ?? const <String>{};
+    final downloadedBytes = downloadedBytesAsync.valueOrNull ?? 0;
 
     // Library state — watched here so the bookmark button in the AppBar rebuilds.
     final manga = mangaAsync.valueOrNull;
@@ -108,6 +118,61 @@ class MangaDetailPage extends ConsumerWidget {
                 onTap: () => context
                     .push('/reader/${actionChapter.id}?mangaId=$mangaId'),
               ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    FilterChip(
+                      label: const Text('Downloaded only'),
+                      selected: downloadedOnly,
+                      onSelected: (selected) => ref
+                          .read(downloadedOnlyFilterProvider(mangaId).notifier)
+                          .state = selected,
+                    ),
+                    Text(
+                      '${downloadedChapterIds.length} downloaded • ${_formatBytes(downloadedBytes)}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    if (downloadedChapterIds.isNotEmpty)
+                      TextButton.icon(
+                        icon: const Icon(Icons.delete_sweep_outlined),
+                        label: const Text('Remove all downloads'),
+                        onPressed: () async {
+                          await ref
+                              .read(downloadServiceProvider)
+                              .removeAllDownloadsForManga(mangaId);
+                          ref.invalidate(
+                              downloadedChapterIdsForMangaProvider(mangaId));
+                          ref.invalidate(
+                              downloadedBytesForMangaProvider(mangaId));
+                          final chapters =
+                              chaptersAsync.valueOrNull ?? const <Chapter>[];
+                          for (final chapter in chapters) {
+                            ref.invalidate(
+                              chapterDownloadStatusProvider(
+                                  mangaId, chapter.id),
+                            );
+                            ref.invalidate(
+                                downloadedChapterProvider(chapter.id));
+                          }
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context)
+                            ..clearSnackBars()
+                            ..showSnackBar(
+                              const SnackBar(
+                                  content: Text(
+                                      'Removed all downloads for this manga.')),
+                            );
+                        },
+                      ),
+                  ],
+                ),
+              ),
+            ),
             chaptersAsync.when(
               loading: () => const SliverToBoxAdapter(
                 child: Padding(
@@ -122,10 +187,13 @@ class MangaDetailPage extends ConsumerWidget {
                 ),
               ),
               data: (chapters) => _ChapterList(
+                mangaId: mangaId,
                 chapters: chapters,
                 preferredLanguage: settings.preferredLanguage,
                 currentChapterId: currentChapterId,
                 readChapterIds: readChapterIds,
+                downloadedOnly: downloadedOnly,
+                downloadedChapterIds: downloadedChapterIds,
                 onChapterSelected: (chapterId) =>
                     context.push('/reader/$chapterId?mangaId=$mangaId'),
               ),
@@ -146,7 +214,15 @@ class _MangaCover extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final coverUrl = manga.coverUrl(512);
+    final coverFile = manga.coverArt?.fileName;
+    final hasLocalCover = coverFile != null &&
+        (coverFile.startsWith('/') || coverFile.startsWith('file:'));
+    final coverUrl = hasLocalCover ? null : manga.coverUrl(512);
+    final localCoverPath = hasLocalCover
+        ? (coverFile.startsWith('file:')
+            ? Uri.parse(coverFile).toFilePath()
+            : coverFile)
+        : null;
     final title = manga.attributes.titleFor('en');
 
     return SliverToBoxAdapter(
@@ -157,7 +233,13 @@ class _MangaCover extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             // Cover art.
-            if (coverUrl != null)
+            if (localCoverPath != null)
+              Image(
+                image: FileImage(File(localCoverPath)),
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const SizedBox.expand(),
+              )
+            else if (coverUrl != null)
               Image(
                 image: CachedNetworkImageProvider(coverUrl),
                 fit: BoxFit.cover,
@@ -286,13 +368,17 @@ class _MangaInfoState extends State<_MangaInfo> {
 
 class _ChapterList extends StatelessWidget {
   const _ChapterList({
+    required this.mangaId,
     required this.chapters,
     required this.preferredLanguage,
     required this.onChapterSelected,
     this.currentChapterId,
     this.readChapterIds = const {},
+    this.downloadedOnly = false,
+    this.downloadedChapterIds = const <String>{},
   });
 
+  final String mangaId;
   final List<Chapter> chapters;
   final String preferredLanguage;
   final void Function(String chapterId) onChapterSelected;
@@ -302,6 +388,9 @@ class _ChapterList extends StatelessWidget {
 
   /// Chapter IDs the user has explicitly finished (swiped past the last page).
   final Set<String> readChapterIds;
+
+  final bool downloadedOnly;
+  final Set<String> downloadedChapterIds;
 
   @override
   Widget build(BuildContext context) {
@@ -314,7 +403,21 @@ class _ChapterList extends StatelessWidget {
       );
     }
 
-    final groups = _groupAndSort(chapters);
+    var groups = _groupAndSort(chapters);
+    if (downloadedOnly) {
+      groups = groups
+          .where((entry) => entry.value
+              .any((chapter) => downloadedChapterIds.contains(chapter.id)))
+          .toList();
+      if (groups.isEmpty) {
+        return const SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.all(32),
+            child: Center(child: Text('No downloaded chapters.')),
+          ),
+        );
+      }
+    }
 
     return SliverList(
       delegate: SliverChildBuilderDelegate(
@@ -322,6 +425,7 @@ class _ChapterList extends StatelessWidget {
           final entry = groups[index];
           return ChapterListTile(
             key: ValueKey(entry.key),
+            mangaId: mangaId,
             chapters: entry.value,
             preferredLanguage: preferredLanguage,
             readState:
@@ -412,6 +516,16 @@ Chapter? _resolveActionChapter(
     return a.attributes.chapterNumber!.compareTo(b.attributes.chapterNumber!);
   });
   return available.first;
+}
+
+String _formatBytes(int bytes) {
+  if (bytes < 1024) return '$bytes B';
+  final kb = bytes / 1024;
+  if (kb < 1024) return '${kb.toStringAsFixed(1)} KB';
+  final mb = kb / 1024;
+  if (mb < 1024) return '${mb.toStringAsFixed(1)} MB';
+  final gb = mb / 1024;
+  return '${gb.toStringAsFixed(2)} GB';
 }
 
 // ── Read / Continue button ────────────────────────────────────────────────────

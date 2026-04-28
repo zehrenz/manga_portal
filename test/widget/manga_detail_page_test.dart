@@ -8,6 +8,7 @@ import 'package:manga_portal/models/chapter.dart';
 import 'package:manga_portal/models/manga.dart';
 import 'package:manga_portal/pages/manga_detail_page.dart';
 import 'package:manga_portal/providers/api_providers.dart';
+import 'package:manga_portal/services/download_service.dart';
 import 'package:manga_portal/services/local_progress.dart';
 
 // ── Fake data ─────────────────────────────────────────────────────────────────
@@ -184,6 +185,29 @@ void main() {
       await _pumpAfterLoad(tester);
 
       expect(find.textContaining('Not available in en'), findsOneWidget);
+    });
+
+    testWidgets('shows completed download as checkmark button', (tester) async {
+      await tester.pumpWidget(
+        _buildApp([
+          mangaProvider('test-manga-id')
+              .overrideWith((ref) async => _fakeManga),
+          chapterFeedProvider('test-manga-id')
+              .overrideWith((ref) async => _fakeChapters),
+          chapterDownloadStatusProvider('test-manga-id', 'ch-2').overrideWith(
+            (ref) async => const ChapterDownloadStatus(
+              chapterId: 'ch-2',
+              mangaId: 'test-manga-id',
+              status: 'completed',
+              progress: 100,
+            ),
+          ),
+        ]),
+      );
+
+      await _pumpAfterLoad(tester);
+
+      expect(find.byTooltip('Remove download'), findsOneWidget);
     });
 
     testWidgets('multi-group chapter expands to show group list',
