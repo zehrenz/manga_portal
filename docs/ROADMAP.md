@@ -409,35 +409,35 @@ _All tasks and tests complete. Verified on emulator: real MangaDex search return
 
 ---
 
-## Feature 10 — Offline Chapter Downloads 🚧 (In Progress)
+## Feature 10 — Offline Chapter Downloads ✅
 
 **Goal**: Let users download selected chapters to local storage and read them fully offline with zero network calls during reading.
 
 ### Tasks
 
-- [ ] Add download UI on `MangaDetailPage` and/or chapter rows:
+- [x] Add download UI on `MangaDetailPage` and/or chapter rows:
   - queue/download/remove chapter
   - per-chapter status chip (Not downloaded / Queued / Downloading / Downloaded / Failed)
-- [ ] Implement `DownloadService`:
+- [x] Implement `DownloadService`:
   - fetch chapter pages once and save image files under app documents storage
   - write all metadata/state to DB tables
   - bounded concurrency and retry/backoff on transient failures
   - mark completed only when all pages are present and validated
-- [ ] Reader offline-first resolution:
+- [x] Reader offline-first resolution:
   - if chapter is downloaded, load local files only
   - do not call `at-home/server` or image network endpoints for downloaded chapters
   - fallback to online flow only when chapter is not downloaded
-- [ ] Add storage management:
+- [x] Add storage management:
   - remove one chapter download
   - remove all downloads for a manga
   - compute and display download size used
-- [ ] Add optional "Downloaded only" filter for library/detail chapter lists.
+- [x] Add optional "Downloaded only" filter for library/detail chapter lists.
 
 ### Tests
 
-- [ ] Unit tests for download state machine and retry logic.
-- [ ] Widget tests for chapter download status rendering.
-- [ ] Integration test:
+- [x] Unit tests for download state machine and retry logic.
+- [x] Widget tests for chapter download status rendering.
+- [x] Integration test:
   - download chapter online
   - relaunch / disable network
   - open downloaded chapter and read pages with no network requests
