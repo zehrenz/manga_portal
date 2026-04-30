@@ -82,7 +82,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   bool _scrollModeChapterRead = false;
 
   // Whether the top/bottom info bars are currently visible.
-  bool _barsVisible = false;
+  // Starts as true so bars are shown when a chapter loads; then hide on first page change.
+  bool _barsVisible = true;
+
+  // Ignore the next PageView onPageChanged callback for bar auto-hide.
+  // Used for initial load and programmatic jumps (restore-progress / mode remap).
+  bool _ignoreNextPageChangeForAutoHide = true;
+
+  // Last observed scroll offset for detecting real movement in scroll mode.
+  double _lastObservedScrollOffset = 0;
 
   // Tracks the last reading mode seen by build so we can keep the current
   // logical page stable when switching direction (LTR <-> RTL).
@@ -147,6 +155,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     _scrollController.dispose();
     _scrollController = ScrollController();
     _scrollController.addListener(_onScrollChanged);
+    _lastObservedScrollOffset = 0;
     _scrollModeChapterRead = false;
     // Pressing a transition button is an explicit intent to start reading the
     // new chapter, so immediately record it as in-progress without waiting for
@@ -160,6 +169,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       _serverRefreshUsed = false;
       _hasUserPaged = fromTransition; // already counts as having paged
       _lastServer = null;
+      _ignoreNextPageChangeForAutoHide = true;
       // Do NOT reset _progressRestored — only restore progress for the entry
       // chapter; subsequent chapters load from the beginning.
       _pageViewKey++;
@@ -183,6 +193,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       final clamped = progress.pageIndex.clamp(0, pages.length - 1);
       if (clamped > 0 && _pageController.hasClients) {
         setState(() => _currentMangaPage = clamped);
+        _ignoreNextPageChangeForAutoHide = true;
         _pageController
             .jumpToPage(_viewIndexForMangaPage(clamped, pages.length));
       }
@@ -213,6 +224,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   // ── Image preloading ───────────────────────────────────────────────────────
 
   void _onPageChanged(int viewIndex, AtHomeServer server) {
+    final shouldAutoHideBars = !_ignoreNextPageChangeForAutoHide;
+    _ignoreNextPageChangeForAutoHide = false;
+
     final dataSaver = ref.read(imageQualityProvider) == 'data-saver';
     final pages = dataSaver ? server.chapter.dataSaver : server.chapter.data;
     final mangaPage = _mangaPageForViewIndex(viewIndex, pages.length);
@@ -221,7 +235,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       setState(() {
         _currentMangaPage = mangaPage;
         _isOnTransitionPage = false;
-        _barsVisible = false;
+        if (shouldAutoHideBars) _barsVisible = false;
       });
       // Only record progress once the user has moved past the first page.
       // This prevents opening a chapter (which parks at page 0) from
@@ -232,7 +246,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     } else {
       setState(() {
         _isOnTransitionPage = true;
-        _barsVisible = false;
+        if (shouldAutoHideBars) _barsVisible = false;
       });
       // User swiped past the last page — chapter is complete.
       if (viewIndex == _nextTransitionSlot(pages.length)) {
@@ -242,13 +256,16 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   }
 
   void _onLocalPageChanged(int viewIndex, List<String> localPages) {
+    final shouldAutoHideBars = !_ignoreNextPageChangeForAutoHide;
+    _ignoreNextPageChangeForAutoHide = false;
+
     final mangaPage = _mangaPageForViewIndex(viewIndex, localPages.length);
 
     if (mangaPage >= 0 && mangaPage < localPages.length) {
       setState(() {
         _currentMangaPage = mangaPage;
         _isOnTransitionPage = false;
-        _barsVisible = false;
+        if (shouldAutoHideBars) _barsVisible = false;
       });
       if (mangaPage > 0) _hasUserPaged = true;
       if (_hasUserPaged) _saveProgress(mangaPage);
@@ -256,7 +273,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     } else {
       setState(() {
         _isOnTransitionPage = true;
-        _barsVisible = false;
+        if (shouldAutoHideBars) _barsVisible = false;
       });
       if (viewIndex == _nextTransitionSlot(localPages.length)) {
         _markCurrentChapterRead();
@@ -366,7 +383,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     if (!_scrollController.hasClients) return;
 
     // Hide bars whenever the user scrolls.
-    if (_barsVisible) setState(() => _barsVisible = false);
+    final offset = _scrollController.offset;
+    final didScroll = (offset - _lastObservedScrollOffset).abs() > 0.5;
+    _lastObservedScrollOffset = offset;
+    if (didScroll && _barsVisible) setState(() => _barsVisible = false);
 
     final maxExtent = _scrollController.position.maxScrollExtent;
     if (maxExtent <= 0) return;
@@ -740,6 +760,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         if (!mounted || !_pageController.hasClients) return;
         final target = _viewIndexForMangaPage(_currentMangaPage, totalPages);
         if (_pageController.page?.round() != target) {
+          _ignoreNextPageChangeForAutoHide = true;
           _pageController.jumpToPage(target);
         }
       });
