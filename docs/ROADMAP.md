@@ -444,6 +444,416 @@ _All tasks and tests complete. Verified on emulator: real MangaDex search return
 
 ---
 
+## Feature 11 — Library Sections & Update Detection
+
+**Goal**: Organize the library into "Continue Reading" and "The Shelf" sections with automatic detection of newly completed or updated manga, plus visual indicators for download status and new chapters.
+
+### Context
+
+**"Finished" status**: A manga is considered finished when the user reads the last chapter currently available in their preferred language.
+
+**"Up" status**: A previously finished manga is "Up" if new chapters have been released in the user's preferred language since they last read. Detecting this requires a background check on library load.
+
+**Section structure**:
+
+- **Continue Reading**: Manga with in-progress reading (not yet finished), ordered by most recent read date (most recent first)
+- **The Shelf**: Finished manga, ordered by most recent save date (can be made sortable later)
+- Both sections merge by last-read-date if a finished manga becomes "Up"
+
+### Tasks
+
+- [ ] Add `finished_chapter_id` column to the manga progress table in `AppDatabase`:
+  - `null` if not marked finished
+  - Stores the chapter ID of the last chapter read when the user completes a series
+- [ ] Add to `LocalProgressService`:
+  - `finishManga(mangaId, lastChapterId)` — mark manga as finished
+  - `isFinished(mangaId)` → bool
+  - `getFinishedChapter(mangaId)` → chapterId
+- [ ] Add to `DownloadService`:
+  - `checkForUpdates(List<String> mangaIds, {Duration timeout = const Duration(seconds: 30)})` — fetch latest chapter feed for all given manga, compare with finished status, return list of manga IDs that are now "Up" (in preferred language only); store detected updates in a transient in-memory cache for this session
+- [ ] Add "Check for new chapters on launch" setting to `SettingsNotifier`:
+  - Three-state enum: `CheckForUpdates.always`, `CheckForUpdates.wifiOnly`, `CheckForUpdates.never`
+  - Default: `CheckForUpdates.wifiOnly`
+  - Persisted in `SharedPreferences`
+  - Add conditional check for network type on app startup (if `wifiOnly`, skip if on cellular)
+- [ ] Update `LibraryPage`:
+  - On first build: if setting is not `never`, launch background `checkForUpdates()` for all finished manga
+  - Display "Continue Reading" section (in-progress manga sorted by last read date, descending)
+  - Display "The Shelf" section (finished manga, sorted by most recent save date, descending)
+  - If any manga detected as "Up", show a short-lived toast (2 seconds) at the bottom: "New chapters available" — and reshuffle manga from Shelf back into Continue Reading (respecting last-read-date ordering)
+  - If `checkForUpdates` times out or throws, silently ignore (no error toast)
+- [ ] Add visual indicators on `MangaCard`:
+  - **Download indicator** (top right): blue down-arrow icon in a rounded square background, shown if manga has any downloaded chapters
+  - **Up indicator** (top left): green up-arrow icon in a rounded square background, shown if manga is "Up" (newly available chapters detected)
+  - Both icons should have semi-transparent backgrounds (e.g., 80% opaque) so they are visible over any cover art color
+- [ ] Update detail page chapter list:
+  - When a user finishes the last chapter in their preferred language, automatically mark the manga as finished via `finishManga()`
+  - Add a visual indicator next to the last-available chapter (e.g., a checkmark or "Latest" badge) so it's clear when reading the final chapter
+- [ ] Update `SettingsPage`:
+  - Add segmented button / radio group for "Check for new chapters on launch" with three options: Always / WiFi Only / Never
+  - Persist selection immediately and respectfully
+
+### Tests
+
+- [ ] Widget test: `test/widget/library_organization_test.dart`
+  - Library renders two sections: Continue Reading and The Shelf
+  - In-progress manga appear in Continue Reading, sorted by last read date (most recent first)
+  - Finished manga appear in The Shelf, sorted by most recent save date
+  - Download indicator shown on manga with downloaded chapters
+  - Up indicator shown on manga detected as "Up"
+  - Toast appears when background update check finds new chapters
+- [ ] Widget test: `test/widget/settings_update_check_test.dart`
+  - Setting dropdown renders all three options and persists selection
+  - Default is WiFi Only
+- [ ] Integration test: `integration_test/library_sections_flow_test.dart`
+  - Add manga to library, read some chapters (not all), verify it appears in Continue Reading
+  - Read all chapters of that manga, verify it moves to The Shelf
+  - Background check detects new chapters, manga moves back to Continue Reading with toast
+
+### Extras
+
+- **Deferred**: Sort order selector for "The Shelf" (most recent save, alphabetical, etc.) — can be added in a future iteration once the core structure is stable
+- **Network type detection**: Uses `connectivity_plus` package (or similar) to differentiate WiFi from cellular. If unavailable or detection fails, treat as "always checking" to avoid silently skipping updates
+- **Cache invalidation**: In-session "Up" status cache is cleared on resume (to pick up any manual refresh from settings), but not persisted to disk (fresh check on each app launch)
+
+---
+
+## Feature 12 — Explore Page & Discovery Lists
+
+**Goal**: Replace the current Search tab with an Explore experience that still supports direct title search, but also exposes browse entry points for genres and curated discovery lists when the search field is empty.
+
+### Context
+
+- The bottom navigation tab should be renamed from **Search** to **Explore** and use a more browse-oriented icon.
+- The search field remains at the top and keeps the current behavior: typing a query shows manga search results immediately.
+- When the search field is empty, the page should show a simple vertical list of browse buttons with trailing chevrons.
+- All browse/search flows must respect the user's configured maximum content rating.
+- `Genre` is sourced from `GET /manga/tag`, filtered to tags whose `attributes.group` is exactly `genre`.
+- `Search by tag` is intentionally deferred: this feature only adds a placeholder page for it so the navigation structure is in place.
+
+### Tasks
+
+- [ ] Rename the `SearchPage` concept in the UI to `ExplorePage`:
+  - Update the bottom navigation label from `Search` to `Explore`
+  - Replace the nav icon with a more discovery-oriented icon
+  - Preserve the existing route path unless there is a clear reason to rename it internally
+- [ ] Update the explore landing page behavior:
+  - Keep the search bar pinned at the top
+  - If the search field contains text, render the current manga search results behavior
+  - If the search field is empty, render a vertical list of browse actions with trailing chevrons:
+    - `Genre`
+    - `Search by tag`
+    - `Popular`
+    - `Highly Rated`
+    - `New`
+    - `Recently Updated`
+- [ ] Add tag-fetching support to `MangaDexApiService`:
+  - Fetch the full tag list from `/manga/tag`
+  - Expose a model/provider surface that can filter tags by `attributes.group`
+  - Cache the fetched tag list in memory for the session to avoid redundant calls while browsing
+- [ ] Add a `Genre` browse page:
+  - Search bar at top with placeholder text `Search genres`
+  - Show all tags where `attributes.group == 'genre'`
+  - Sort genre buttons alphabetically by localized English tag name
+  - Typing in the genre search field filters the visible buttons client-side
+  - Tapping a genre opens a manga results page for that genre
+- [ ] Add a reusable browse results page pattern:
+  - Display manga in the same paginated grid style used by current search results
+  - Support a page title matching the selected browse mode (`Popular`, `Highly Rated`, etc.)
+  - Respect current content-rating filtering in every query
+- [ ] Add browse queries for discovery lists:
+  - `Popular` → `/manga` sorted with `order[followedCount]=desc`
+  - `Highly Rated` → `/manga` sorted with `order[rating]=desc`
+  - `New` → `/manga` sorted with `order[createdAt]=desc`
+  - `Recently Updated` → `/manga` sorted with `order[latestUploadedChapter]=desc`
+  - `Genre results` → `/manga` with `includedTags[]` for the selected genre tag ID
+- [ ] Add a placeholder `Search by tag` page:
+  - Reachable from the Explore landing page
+  - Shows a simple `Coming soon` message
+  - No real tag-search implementation yet; that remains the next feature
+- [ ] Add/adjust routes in `app.dart` for:
+  - Genre list page
+  - Genre results page
+  - Browse results pages (or one reusable results route)
+  - Search-by-tag placeholder page
+
+### Tests
+
+- [ ] Widget test: `test/widget/explore_page_test.dart`
+  - Empty search shows the browse action list
+  - Entering text switches to manga search results
+  - Bottom nav label shows `Explore`
+- [ ] Widget test: `test/widget/genre_page_test.dart`
+  - Only tags in the `genre` group are shown
+  - Genres are sorted alphabetically
+  - Genre search field filters the visible list client-side
+- [ ] Widget test: `test/widget/discover_results_page_test.dart`
+  - Popular / Highly Rated / New / Recently Updated pages render manga grids from mocked providers
+  - Genre results page renders manga for the selected genre
+  - Search-by-tag route renders `Coming soon`
+- [ ] Integration test: `integration_test/explore_flow_test.dart`
+  - Open Explore tab with empty search and see browse actions
+  - Open Genre page, filter genres, tap one, and see manga results
+  - Open Popular and verify sorted results page loads
+  - Open Search by tag and see the placeholder page
+
+### Extras
+
+- **Future-ready route structure**: Keep the results-page implementation generic so the next feature can plug advanced tag filtering into the same browse results UI instead of creating a second, parallel flow.
+- **Presentation intentionally simple for now**: The empty-state browse actions are a plain vertical list instead of card tiles so the feature focuses on behavior and navigation first.
+
+---
+
+## Feature 13 — Tag Search (Search by Tag)
+
+**Goal**: Implement the `Search by tag` placeholder from Feature 12 into a fully functional tag-query builder that lets users include and exclude MangaDex tags, then browse matching manga in a results page that restores its tag state when the user navigates back.
+
+### Layout (Option 2 — Two-Zone Composer)
+
+The page uses two visible zones stacked vertically:
+
+**Zone 1 — Query summary card** (always visible, not affected by filter):
+
+- Shows included tags as green chips and excluded tags as red chips, each with an `✕` to remove
+- A small summary line: `N included · N excluded`
+- Does not scroll independently — collapses to compact if tall (capped, internally scrollable if needed)
+
+**Zone 2 — Tag browser** (below the summary card):
+
+- A filter text field at the top: `Filter tags...`
+- A helper line: `Tap to include · tap again to exclude · tap once more to remove`
+- Tags displayed as chips, sorted at all times in three groups in order: **Included** (green) → **Excluded** (red) → **Unselected** (neutral); alphabetically within each group
+- Filter text only applies to the **unselected** group; included and excluded chips stay pinned in their groups at the top of the browser above the filter results
+- Tapping an unselected chip → included (green); tapping included → excluded (red); tapping excluded → unselected (returned to bottom pool alphabetically)
+
+**Bottom action bar** (always pinned):
+
+- `Includes: AND | OR` segmented toggle — controls `includedTagsMode` sent to the API; excluded tags always use `OR` mode (API default)
+  - Wrap this toggle in a clearly labeled region so it can be commented out in one block for A/B testing without touching surrounding code
+- `[ Clear ]` (secondary color) — immediately unselects all tags, resets filter text
+- `[ Search (N tags) ]` (primary color) — disabled until at least one tag is selected; shows count of total selected tags
+
+### Results page behavior
+
+- Navigating back from results restores the tag page in exactly the state it was left (included/excluded sets, filter text, AND/OR toggle value)
+- State is session-only: persists only while staying within the Explore tab flow; cleared if the user leaves the Explore tab entirely or the app is killed
+- Results page waits for the first API response before rendering anything (no skeleton/spinner mid-load)
+- Once data arrives, show a count line at the top: `N manga found` (uses the `total` field from the API paginated response)
+- Below the count, show the standard paginated manga grid
+- All results respect the user's configured maximum content rating
+
+### Alternate layout note (Option 3 — Sorted Chip Pool, for future A/B test)
+
+User-proposed alternative to implement and compare separately:
+
+- No separate query summary card at the top
+- All tags live in a single pool, sorted dynamically: **Included (green)** → **Excluded (red)** → **Unselected (neutral)**, alphabetically within each group
+- Tap cycle: unselected → green (included) → red (excluded) → unselected
+- Filter only applies to the unselected group at the bottom; selected chips stay pinned at the top by sort order
+- Same bottom action bar: AND/OR toggle, `Clear`, `Search`
+- This layout trades the explicit query card for a unified view — simpler at a glance but less visually separated
+
+### API details
+
+- Tag list: reuse the cached `GET /manga/tag` result from Feature 12 (no extra call)
+- Results query: `GET /manga` with `includedTags[]`, `excludedTags[]`, `includedTagsMode` (`AND` or `OR`), and `contentRating[]` from settings
+- `excludedTagsMode` is always `OR` (API default; not exposed in UI)
+
+### Tasks
+
+- [ ] Remove the placeholder `Coming soon` content from the `Search by tag` route
+- [ ] Create `lib/pages/tag_search_page.dart`:
+  - Two-zone layout: query summary card + tag browser
+  - Tap-cycle state machine per tag: `unselected → included → excluded → unselected`
+  - Sort applied on every state change: included → excluded → unselected, alphabetical within each
+  - Filter text field — affects only the unselected pool
+  - `Clear` button resets all tag states and clears filter field
+  - AND/OR segmented toggle for `includedTagsMode`; isolated in a labeled widget block for easy A/B removal
+  - `Search` button enabled only when ≥ 1 tag selected; shows total selected count
+- [ ] Session state: hold tag search state in a Riverpod notifier scoped to the Explore navigation stack; cleared when Explore tab is reset
+- [ ] Create `lib/pages/tag_results_page.dart`:
+  - Accepts included tag IDs, excluded tag IDs, and includedTagsMode as parameters
+  - Waits for first API response before rendering
+  - Shows `N manga found` count from API `total`
+  - Standard paginated manga grid below the count
+  - Back navigation returns to `TagSearchPage` with state intact (no re-init)
+- [ ] Add `fetchTagSearchResults(...)` to `MangaDexApiService` (or reuse existing search with tag params)
+- [ ] Register `TagResultsPage` route in `app.dart` (extra path params or query params for tag IDs and mode)
+
+### Tests
+
+- [ ] Widget test: `test/widget/tag_search_page_test.dart`
+  - Tags render sorted: included → excluded → unselected, alphabetical within groups
+  - Tap cycle correctly transitions unselected → included → excluded → unselected
+  - Filter text only affects unselected chips; included/excluded chips stay visible
+  - `Clear` button resets all selections and filter text
+  - `Search` button disabled with zero selections; shows correct tag count when ≥ 1 selected
+  - AND/OR toggle state changes `includedTagsMode`
+- [ ] Widget test: `test/widget/tag_results_page_test.dart`
+  - Page waits (empty) until data resolves
+  - Renders count line and manga grid from mocked provider
+  - Respects content rating setting in API call
+- [ ] Integration test: `integration_test/tag_search_flow_test.dart`
+  - Open `Search by tag` → include two tags → exclude one → tap `Search` → results page shows count and manga
+  - Navigate back → tag page restores included/excluded state and filter text
+  - Tap `Clear` → all tags return to unselected
+
+---
+
+## Feature 14 — More Page & Settings Reorganization
+
+**Goal**: Reorganize the `Settings` tab into a `More` tab using an ellipsis icon, restructure the settings into distinct organized sections, add new reading mode preferences and data management controls, and expose app information and storage details.
+
+### Context
+
+**Navigation structure**: The bottom navigation tab is renamed from `Settings` to `More` with an ellipsis (`⋯`) icon. The `More` page acts as a hub with section buttons: tapping a button navigates to a dedicated settings page for that section.
+
+**Reading mode defaults**: When opening a chapter, the reader checks in order:
+
+1. Is there a manga-specific reading mode override (stored per-manga)? Use it.
+2. If not, determine manga type: does it have a tag with name `"Web Comic"` (case-insensitive)? If yes, type is "Webcomic"; otherwise, type is "Paged".
+3. Check the type-based default from Preferences: Paged defaults to `R->L`, Webcomic defaults to `Vertical`.
+4. In the reader bottom sheet, show the current mode (derived from override or type-default). Selecting a new mode creates a manga-specific override, detaching future reads of this manga from the type-based preference.
+
+### Sections and content
+
+**Preferences page**:
+
+- Appearance settings (theme, language, content rating — currently exists)
+- Content settings (content rating — currently exists, may consolidate with Appearance)
+- Reading settings:
+  - Default reading direction for "Paged" manga: `SegmentedButton` with `L->R / R->L / Vertical`; default `R->L`
+  - Default reading direction for "Webcomic" manga: `SegmentedButton` with `L->R / R->L / Vertical`; default `Vertical`
+  - Check for new chapters on launch: `Always / WiFi Only / Never` (from Feature 11)
+  - Placeholder toggle: `"Pre-download next chapter"` with a sub-setting `"Download next [1-10] chapters"` (inactive, noted as coming soon)
+  - Placeholder toggle: `"Delete chapters when finished reading"` (inactive, noted as coming soon)
+
+**FAQ page**:
+
+- Collection of expandable drawer items with hardcoded Q&A
+- Start with one Q: `"Why aren't all of the chapters available for my manga?"` with a concise answer
+- Architecture designed to easily add more Q&A pairs (drawers in a list, each with a title and expandable body)
+
+**Support the dev page**:
+
+- Button/link labeled `"Donate"` that opens a webview or external link (non-functional for now; placeholder)
+- Friendly message encouraging support
+
+**Clear data page**:
+
+- Six buttons, each with a confirmation dialog before executing. Confirmation message format: `"This will {action} and cannot be undone. Are you sure you want to proceed?"`
+  - `Clear reading history` — deletes all progress and reading data via `LocalProgressService.clearAll()`
+  - `Clear library` — unbookmarks all titles via `LibraryService.clearAll()` (or equivalent provider)
+  - `Reset settings` — restores all Preferences to defaults (Appearance, Content, Reading, Pre-download toggles)
+  - `Remove downloads` — deletes all downloaded chapters via `DownloadService.removeAll()`
+  - `Clear cache` — clears:
+    - `CachedNetworkImage` cache (covers, chapter pages)
+    - DB metadata cache tables (cached manga attributes, cached chapter data)
+    - In-memory tag list cache (from Feature 12)
+  - `Clear all app data` — executes all of the above sequentially
+
+**About page**:
+
+- Read-only section displaying:
+  - App name: `Manga Portal`
+  - Version number (from `pubspec.yaml`)
+  - Build number
+  - `Privacy Policy` link (placeholder; opens webview or external URL)
+  - `Terms of Service` link (placeholder)
+  - Attribution section: `Built with Flutter`, credits to MangaDex, note about scanlation groups
+
+**Storage info page**:
+
+- Read-only display:
+  - `Downloads: X MB` — size of all downloaded chapters from `DownloadService`
+  - `Cache: Y MB` — combined size of `CachedNetworkImage` cache + DB metadata + tag list
+  - `Total: Z MB`
+- Informational only; complements "Clear data" by letting users see what's consuming space
+
+### Tasks
+
+- [ ] Rename `SettingsPage` to `MorePage` in the bottom navigation (label: `More`, icon: ellipsis `⋯`)
+- [ ] Update `app.dart` routing: change the settings route or register `/more` instead of `/settings`
+- [ ] Create a `MorePage` hub:
+  - Vertical list of section buttons with trailing chevrons
+  - Buttons: `Preferences`, `FAQ`, `Support the dev`, `Clear data`, `About`, `Storage info`
+  - Each button navigates to its dedicated page
+- [ ] Create `PreferencesPage`:
+  - Consolidated display of Appearance, Content, and Reading settings
+  - Add new reading mode sliders for Paged and Webcomic defaults
+  - Add existing setting: Check for new chapters on launch
+  - Add placeholder toggles: Pre-download next chapter (with sub-setting), Delete chapters when finished reading
+  - All settings persist to `SharedPreferences` or Riverpod notifiers as appropriate
+- [ ] Create `FAQPage`:
+  - Simple list of FAQ items, each with a title (question) and expandable drawer body (answer)
+  - Start with one Q&A: `"Why aren't all of the chapters available for my manga?"` with an appropriate explanation
+  - Structure the data (e.g., a list of `{question, answer}` dicts) so adding more Q&A is trivial
+- [ ] Create `SupportTheDevPage`:
+  - Friendly message encouraging donations
+  - Button labeled `"Donate"` (non-functional; placeholder for future donation URL)
+- [ ] Create `ClearDataPage`:
+  - Six buttons, each with a label and matching confirmation dialog
+  - Implement each clear action by calling the appropriate service methods
+  - On success, show a snackbar: `"[Action] cleared successfully"`
+- [ ] Create `AboutPage`:
+  - Display app name, version, build number
+  - Links to Privacy Policy and Terms of Service (non-functional, placeholders)
+  - Attribution section (text-only or small linked items)
+- [ ] Create `StorageInfoPage`:
+  - Read-only display of storage breakdown
+  - Fetch size from `DownloadService.getTotalDownloadedSize()` and cache cleanup utilities
+  - Format sizes in MB or GB as appropriate
+- [ ] Update `ReaderPage`:
+  - Determine manga type by checking for `"Web Comic"` tag (case-insensitive match) in manga's tag list
+  - On load, check for manga-specific reading mode override; if not found, use the type-based default from Preferences
+  - In the reader bottom sheet, display the current mode and allow selection
+  - Selecting a new mode creates (or updates) a manga-specific override
+- [ ] Add to `LocalProgressService` (or equivalent service):
+  - `saveReadingModeOverride(mangaId, readingMode)` — create a per-manga override
+  - `getReadingModeOverride(mangaId)` → `ReadingMode?` (null if no override)
+  - `getMangaType(manga)` → `"Paged" | "Webcomic"` (checks for Web Comic tag case-insensitively)
+- [ ] Add storage size calculation methods:
+  - `DownloadService.getTotalDownloadedSize()` → bytes
+  - Cache size helper (approximation is fine; can query `CachedNetworkImage` internals or estimate)
+- [ ] Update `SettingsNotifier` to include type-based reading mode defaults
+
+### Tests
+
+- [ ] Widget test: `test/widget/more_page_test.dart`
+  - More page displays six section buttons
+  - Tapping each button navigates to its page
+- [ ] Widget test: `test/widget/preferences_page_test.dart`
+  - All existing settings (appearance, content, check for new chapters) render correctly
+  - New Paged/Webcomic reading mode sliders render with correct defaults and persist on change
+  - Placeholder toggles render as disabled/info state
+- [ ] Widget test: `test/widget/faq_page_test.dart`
+  - FAQ items render as titles
+  - Tapping expands the drawer to show the answer
+  - Multiple Q&A items can coexist
+- [ ] Widget test: `test/widget/clear_data_page_test.dart`
+  - All six buttons render
+  - Tapping a button shows the confirmation dialog with the correct message
+  - Confirming executes the action; canceling does nothing
+- [ ] Widget test: `test/widget/about_page_test.dart`
+  - Version, build number, links, and attribution text all render
+- [ ] Widget test: `test/widget/storage_info_page_test.dart`
+  - Storage breakdown renders (Downloads, Cache, Total)
+  - Values update if a refresh is triggered (or show static values from mock)
+- [ ] Integration test: `integration_test/more_page_flow_test.dart`
+  - Open More tab → see section buttons → tap Preferences → sliders render and persist
+  - Open FAQ → expand Q&A → answer shows
+  - Open Clear data → confirm clearing reading history → snackbar shown, data cleared
+  - Open About and Storage info pages without error
+
+### Extras
+
+- **Web Comic tag matching**: Uses case-insensitive string matching for robustness (e.g., "web comic", "Web Comic", "WEB COMIC" all match)
+- **Future-proof FAQ structure**: Q&A items are stored in a simple data structure so future agents can add more items without touching the page layout
+- **Placeholder settings**: Pre-download and Delete-on-finish toggles are visually marked as "Coming soon" so users understand they're planned but not yet active
+- **Deferred features**: Advanced reader tap zones (Feature X) and Library sort order (Feature Y) are not in scope here but can be added to Preferences later
+
+---
+
 ## Stretch Goal — Self-Hosted Server Support (Future, No Implementation Yet)
 
 **Goal**: Allow users to point the app at one or more self-hosted manga servers that implement the same API contract as MangaDex. Searches and browse flows would aggregate results from MangaDex and any configured custom servers.
