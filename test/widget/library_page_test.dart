@@ -35,8 +35,16 @@ void main() {
   group('LibraryPage', () {
     testWidgets('renders a MangaCard for each saved manga', (tester) async {
       final entries = [
-        const LibraryEntry(id: 'manga-1', title: 'Test Manga'),
-        const LibraryEntry(id: 'manga-2', title: 'Another Manga'),
+        LibraryEntry(
+          id: 'manga-1',
+          title: 'Test Manga',
+          savedAt: DateTime(2026, 1, 1),
+        ),
+        LibraryEntry(
+          id: 'manga-2',
+          title: 'Another Manga',
+          savedAt: DateTime(2026, 1, 2),
+        ),
       ];
 
       await tester.pumpWidget(_buildApp(entries));

@@ -106,6 +106,31 @@ class SettingsPage extends ConsumerWidget {
                   onSelectionChanged: (values) =>
                       notifier.setImageQuality(values.first),
                 ),
+                const SizedBox(height: 16),
+                Text(
+                  'Check for new chapters on launch',
+                  style: Theme.of(context).textTheme.bodyLarge,
+                ),
+                const SizedBox(height: 10),
+                SegmentedButton<ChapterRefreshMode>(
+                  segments: const [
+                    ButtonSegment(
+                      value: ChapterRefreshMode.always,
+                      label: Text('Always'),
+                    ),
+                    ButtonSegment(
+                      value: ChapterRefreshMode.wifiOnly,
+                      label: Text('WiFi only'),
+                    ),
+                    ButtonSegment(
+                      value: ChapterRefreshMode.never,
+                      label: Text('Never'),
+                    ),
+                  ],
+                  selected: {settings.chapterRefreshMode},
+                  onSelectionChanged: (values) =>
+                      notifier.setChapterRefreshMode(values.first),
+                ),
               ],
             ),
           ),

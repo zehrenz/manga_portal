@@ -34,6 +34,7 @@ class ChapterListTile extends StatefulWidget {
     required this.preferredLanguage,
     required this.onChapterSelected,
     this.readState = ChapterReadState.unread,
+    this.isLatest = false,
   });
 
   final String mangaId;
@@ -41,6 +42,7 @@ class ChapterListTile extends StatefulWidget {
   final String preferredLanguage;
   final void Function(String chapterId) onChapterSelected;
   final ChapterReadState readState;
+  final bool isLatest;
 
   @override
   State<ChapterListTile> createState() => _ChapterListTileState();
@@ -72,6 +74,7 @@ class _ChapterListTileState extends State<ChapterListTile> {
         label: title,
         chapter: preferred.first,
         readState: widget.readState,
+        isLatest: widget.isLatest,
         onTap: () => widget.onChapterSelected(preferred.first.id),
       );
     }
@@ -81,6 +84,7 @@ class _ChapterListTileState extends State<ChapterListTile> {
       label: title,
       chapters: preferred,
       readState: widget.readState,
+      isLatest: widget.isLatest,
       expanded: _expanded,
       onToggle: () => setState(() => _expanded = !_expanded),
       onChapterSelected: widget.onChapterSelected,
@@ -124,6 +128,7 @@ class _SingleGroupTile extends StatelessWidget {
     required this.chapter,
     required this.onTap,
     this.readState = ChapterReadState.unread,
+    this.isLatest = false,
   });
 
   final String mangaId;
@@ -131,6 +136,7 @@ class _SingleGroupTile extends StatelessWidget {
   final Chapter chapter;
   final VoidCallback onTap;
   final ChapterReadState readState;
+  final bool isLatest;
 
   @override
   Widget build(BuildContext context) {
@@ -147,9 +153,24 @@ class _SingleGroupTile extends StatelessWidget {
         Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5);
 
     final tile = ListTile(
-      title: Text(
-        label,
-        style: isRead ? TextStyle(color: dimColor) : null,
+      title: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(
+              label,
+              style: isRead ? TextStyle(color: dimColor) : null,
+            ),
+          ),
+          if (isLatest) ...[
+            const SizedBox(width: 8),
+            const _LatestBadge(),
+          ],
+          if (isRead) ...[
+            const SizedBox(width: 6),
+            Icon(Icons.check_circle_outline, size: 16, color: dimColor),
+          ],
+        ],
       ),
       subtitle: subtitle.isNotEmpty
           ? Text(
@@ -195,6 +216,7 @@ class _MultiGroupTile extends StatelessWidget {
     required this.onToggle,
     required this.onChapterSelected,
     this.readState = ChapterReadState.unread,
+    this.isLatest = false,
   });
 
   final String mangaId;
@@ -204,6 +226,7 @@ class _MultiGroupTile extends StatelessWidget {
   final VoidCallback onToggle;
   final void Function(String chapterId) onChapterSelected;
   final ChapterReadState readState;
+  final bool isLatest;
 
   @override
   Widget build(BuildContext context) {
@@ -213,9 +236,20 @@ class _MultiGroupTile extends StatelessWidget {
         Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5);
 
     final header = ListTile(
-      title: Text(
-        label,
-        style: isRead ? TextStyle(color: dimColor) : null,
+      title: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(
+              label,
+              style: isRead ? TextStyle(color: dimColor) : null,
+            ),
+          ),
+          if (isLatest) ...[
+            const SizedBox(width: 8),
+            const _LatestBadge(),
+          ],
+        ],
       ),
       subtitle: Text(
         '${chapters.length} translations',
@@ -328,6 +362,27 @@ class _ChapterDownloadAction extends ConsumerStatefulWidget {
   @override
   ConsumerState<_ChapterDownloadAction> createState() =>
       _ChapterDownloadActionState();
+}
+
+class _LatestBadge extends StatelessWidget {
+  const _LatestBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primaryContainer,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        'Latest',
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: Theme.of(context).colorScheme.onPrimaryContainer,
+            ),
+      ),
+    );
+  }
 }
 
 class _ChapterDownloadActionState

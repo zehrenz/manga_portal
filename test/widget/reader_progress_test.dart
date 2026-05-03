@@ -143,12 +143,6 @@ void main() {
       await tester.pumpWidget(_buildReader());
       await settle(tester);
 
-      // Bars are hidden by default — tap to show them.
-      await tester.tapAt(const Offset(400, 300));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
-      await tester.pump();
-
       expect(find.text('1 / 3'), findsOneWidget);
     });
 
@@ -160,12 +154,6 @@ void main() {
         },
       ));
       await settle(tester);
-
-      // Bars are hidden by default — tap to show them.
-      await tester.tapAt(const Offset(400, 300));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
-      await tester.pump();
 
       // Progress restore is async: jump happens after all the above pumps.
       expect(find.text('3 / 3'), findsOneWidget);
@@ -242,11 +230,6 @@ void main() {
         ),
       );
       await settle(tester);
-
-      await tester.tapAt(const Offset(400, 300));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
-      await tester.pump();
 
       expect(find.text('1 / 1'), findsOneWidget);
       expect(find.textContaining('Could not load chapter'), findsNothing);

@@ -810,6 +810,25 @@ class _DownloadedBytesForMangaProviderElement
   String get mangaId => (origin as DownloadedBytesForMangaProvider).mangaId;
 }
 
+String _$mangaIdsWithDownloadsHash() =>
+    r'65d789ea738738a0b5c91ebebf3ed3778a3c51bf';
+
+/// See also [mangaIdsWithDownloads].
+@ProviderFor(mangaIdsWithDownloads)
+final mangaIdsWithDownloadsProvider =
+    AutoDisposeFutureProvider<Set<String>>.internal(
+  mangaIdsWithDownloads,
+  name: r'mangaIdsWithDownloadsProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$mangaIdsWithDownloadsHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef MangaIdsWithDownloadsRef = AutoDisposeFutureProviderRef<Set<String>>;
 String _$atHomeServerHash() => r'90bb36633d7153db3f323e600977eb8f754f4e39';
 
 /// See also [atHomeServer].

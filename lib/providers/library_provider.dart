@@ -1,11 +1,16 @@
 import 'dart:convert';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/manga.dart';
 
 part 'library_provider.g.dart';
+
+/// Bumped whenever the library page should re-sort its sections.
+/// Increment this from any navigation event that returns to the library.
+final libraryResortTriggerProvider = StateProvider<int>((ref) => 0);
 
 /// A lightweight record of a manga saved to the local library.
 /// Stores only what is needed to render a cover grid without a network call.
@@ -14,6 +19,7 @@ class LibraryEntry {
     required this.id,
     required this.title,
     this.coverFileName,
+    required this.savedAt,
   });
 
   final String id;
@@ -21,23 +27,28 @@ class LibraryEntry {
 
   /// The cover filename used to reconstruct the CDN cover URL.
   final String? coverFileName;
+  final DateTime savedAt;
 
   Map<String, dynamic> toJson() => {
         'id': id,
         'title': title,
         'coverFileName': coverFileName,
+        'savedAt': savedAt.toIso8601String(),
       };
 
   factory LibraryEntry.fromJson(Map<String, dynamic> json) => LibraryEntry(
         id: json['id'] as String,
         title: json['title'] as String,
         coverFileName: json['coverFileName'] as String?,
+        savedAt: DateTime.tryParse(json['savedAt'] as String? ?? '') ??
+            DateTime.fromMillisecondsSinceEpoch(0),
       );
 
   factory LibraryEntry.fromManga(Manga manga) => LibraryEntry(
         id: manga.id,
         title: manga.attributes.titleFor('en'),
         coverFileName: manga.coverArt?.fileName,
+        savedAt: DateTime.now(),
       );
 
   /// Reconstructs a minimal [Manga] suitable for display in a [MangaCard].
@@ -60,14 +71,16 @@ class LibraryNotifier extends _$LibraryNotifier {
   @override
   Future<List<LibraryEntry>> build() async {
     final prefs = await SharedPreferences.getInstance();
-    return _decode(prefs.getStringList(_prefsKey) ?? []);
+    final entries = _decode(prefs.getStringList(_prefsKey) ?? []);
+    entries.sort((a, b) => b.savedAt.compareTo(a.savedAt));
+    return entries;
   }
 
   /// Adds [manga] to the library. No-ops if already present.
   Future<void> addManga(Manga manga) async {
     final entries = await future;
     if (entries.any((e) => e.id == manga.id)) return;
-    final updated = [...entries, LibraryEntry.fromManga(manga)];
+    final updated = [LibraryEntry.fromManga(manga), ...entries];
     await _persist(updated);
     state = AsyncData(updated);
   }

@@ -28,6 +28,7 @@ class LibraryEntriesTable extends Table {
 class MangaProgressTable extends Table {
   TextColumn get mangaId => text()();
   TextColumn get chapterId => text().nullable()();
+  TextColumn get finishedChapterId => text().nullable()();
   IntColumn get pageIndex => integer().withDefault(const Constant(0))();
   DateTimeColumn get updatedAt => dateTime()();
 
@@ -128,7 +129,17 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting() : super(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onUpgrade: (m, from, to) async {
+          if (from < 2) {
+            await m.addColumn(
+                mangaProgressTable, mangaProgressTable.finishedChapterId);
+          }
+        },
+      );
 
   Future<void> upsertSetting(String key, String value) {
     return into(settingsTable).insertOnConflictUpdate(
@@ -178,6 +189,7 @@ class AppDatabase extends _$AppDatabase {
         mangaId: mangaId,
         chapterId: Value(chapterId),
         pageIndex: Value(pageIndex),
+        finishedChapterId: const Value.absent(),
         updatedAt: DateTime.now(),
       ),
     );
@@ -191,8 +203,47 @@ class AppDatabase extends _$AppDatabase {
     return (chapterId: row?.chapterId, pageIndex: row?.pageIndex ?? 0);
   }
 
+  Future<void> setFinishedChapter(String mangaId, String chapterId) async {
+    final existing = await (select(mangaProgressTable)
+          ..where((t) => t.mangaId.equals(mangaId)))
+        .getSingleOrNull();
+    if (existing == null) {
+      await into(mangaProgressTable).insert(
+        MangaProgressTableCompanion.insert(
+          mangaId: mangaId,
+          chapterId: Value(chapterId),
+          finishedChapterId: Value(chapterId),
+          updatedAt: DateTime.now(),
+        ),
+      );
+      return;
+    }
+
+    await (update(mangaProgressTable)..where((t) => t.mangaId.equals(mangaId)))
+        .write(
+      MangaProgressTableCompanion(
+        finishedChapterId: Value(chapterId),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
+  Future<String?> getFinishedChapter(String mangaId) async {
+    final row = await (select(mangaProgressTable)
+          ..where((t) => t.mangaId.equals(mangaId)))
+        .getSingleOrNull();
+    return row?.finishedChapterId;
+  }
+
   Future<List<MangaProgressTableData>> allProgressRows() {
     return select(mangaProgressTable).get();
+  }
+
+  Future<Map<String, DateTime>> allProgressUpdatedAt() async {
+    final rows = await select(mangaProgressTable).get();
+    return {
+      for (final row in rows) row.mangaId: row.updatedAt,
+    };
   }
 
   Future<void> markChapterRead(String mangaId, String chapterId) {
@@ -323,6 +374,13 @@ class AppDatabase extends _$AppDatabase {
   Future<List<DownloadJobsTableData>> getDownloadJobsForManga(String mangaId) {
     return (select(downloadJobsTable)..where((t) => t.mangaId.equals(mangaId)))
         .get();
+  }
+
+  Future<Set<String>> getMangaIdsWithCompletedDownloads() async {
+    final rows = await (select(downloadJobsTable)
+          ..where((t) => t.status.equals('completed')))
+        .get();
+    return rows.map((row) => row.mangaId).toSet();
   }
 
   Future<void> replaceDownloadedPages(

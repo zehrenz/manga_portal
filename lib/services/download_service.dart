@@ -70,6 +70,9 @@ class DownloadService {
   final MangaDexApiService _apiService;
   final HttpClient _httpClient = HttpClient();
   static const _libraryPrefsKey = 'library_entries';
+  final Set<String> _upMangaIds = <String>{};
+
+  Set<String> getUpMangaIds() => Set.unmodifiable(_upMangaIds);
 
   Stream<ChapterDownloadStatus> watchChapterStatus(
     String chapterId, {
@@ -135,6 +138,58 @@ class DownloadService {
     for (final chapterId in ids) {
       await removeChapterDownload(chapterId);
     }
+  }
+
+  Future<Set<String>> getMangaIdsWithDownloads() {
+    return _db.getMangaIdsWithCompletedDownloads();
+  }
+
+  Future<Set<String>> checkForUpdates(
+    List<String> mangaIds, {
+    required String preferredLanguage,
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    final updated = <String>{};
+    final started = DateTime.now();
+
+    for (final mangaId in mangaIds) {
+      if (DateTime.now().difference(started) > timeout) {
+        break;
+      }
+
+      final finishedChapterId = await _db.getFinishedChapter(mangaId);
+      if (finishedChapterId == null) continue;
+
+      try {
+        final chapters = await _fetchAllChapters(mangaId);
+        final preferred = chapters
+            .where((c) => c.attributes.translatedLanguage == preferredLanguage)
+            .toList();
+        if (preferred.isEmpty) continue;
+
+        preferred.sort((a, b) {
+          final aNum = double.tryParse(a.attributes.chapterNumber ?? '');
+          final bNum = double.tryParse(b.attributes.chapterNumber ?? '');
+          if (aNum != null && bNum != null) return aNum.compareTo(bNum);
+          if (a.attributes.chapterNumber == null) return -1;
+          if (b.attributes.chapterNumber == null) return 1;
+          return (a.attributes.chapterNumber ?? '')
+              .compareTo(b.attributes.chapterNumber ?? '');
+        });
+
+        final latest = preferred.last;
+        if (latest.id != finishedChapterId) {
+          updated.add(mangaId);
+        }
+      } catch (_) {
+        // Best-effort background refresh: ignore failures per manga.
+      }
+    }
+
+    _upMangaIds
+      ..clear()
+      ..addAll(updated);
+    return updated;
   }
 
   Future<void> downloadChapter({
@@ -335,10 +390,11 @@ class DownloadService {
     final exists = entries.any((e) => e['id'] == mangaId);
     if (exists) return;
 
-    entries.add({
+    entries.insert(0, {
       'id': mangaId,
       'title': title,
       'coverFileName': coverPathOrName,
+      'savedAt': DateTime.now().toIso8601String(),
     });
     await prefs.setStringList(
       _libraryPrefsKey,

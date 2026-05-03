@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import '../database/app_database.dart';
+import 'package:flutter/foundation.dart' show VoidCallback;
 
 /// Persists and retrieves per-manga reading progress.
 ///
@@ -12,13 +13,19 @@ class LocalProgressService {
     this._progressByManga,
     this._readByManga,
     this._modeByManga,
+    this._finishedChapterByManga,
+    this._lastReadAtByManga,
+    this._onProgressChanged,
   );
 
   final AppDatabase _db;
+  final VoidCallback? _onProgressChanged;
 
   final Map<String, ({String? chapterId, int pageIndex})> _progressByManga;
   final Map<String, Set<String>> _readByManga;
   final Map<String, String> _modeByManga;
+  final Map<String, String> _finishedChapterByManga;
+  final Map<String, DateTime> _lastReadAtByManga;
 
   static Future<LocalProgressService> create(AppDatabase db) async {
     final progressRows = await db.allProgressRows();
@@ -28,6 +35,13 @@ class LocalProgressService {
     final progress = <String, ({String? chapterId, int pageIndex})>{
       for (final row in progressRows)
         row.mangaId: (chapterId: row.chapterId, pageIndex: row.pageIndex),
+    };
+    final finished = <String, String>{
+      for (final row in progressRows)
+        if (row.finishedChapterId != null) row.mangaId: row.finishedChapterId!,
+    };
+    final lastRead = <String, DateTime>{
+      for (final row in progressRows) row.mangaId: row.updatedAt,
     };
 
     final read = <String, Set<String>>{};
@@ -40,13 +54,31 @@ class LocalProgressService {
         row.mangaId: (row.mode == 'paged') ? 'ltr' : row.mode,
     };
 
-    return LocalProgressService._(db, progress, read, modes);
+    return LocalProgressService._(
+        db, progress, read, modes, finished, lastRead, null);
+  }
+
+  /// Creates a [LocalProgressService] with an [onProgressChanged] callback
+  /// that fires whenever [saveProgress] is called.
+  static Future<LocalProgressService> createWithCallback(
+      AppDatabase db, VoidCallback onProgressChanged) async {
+    final s = await create(db);
+    return LocalProgressService._(
+        s._db,
+        s._progressByManga,
+        s._readByManga,
+        s._modeByManga,
+        s._finishedChapterByManga,
+        s._lastReadAtByManga,
+        onProgressChanged);
   }
 
   /// Saves the current reading position for [mangaId].
   void saveProgress(String mangaId, String chapterId, int pageIndex) {
     _progressByManga[mangaId] = (chapterId: chapterId, pageIndex: pageIndex);
+    _lastReadAtByManga[mangaId] = DateTime.now();
     unawaited(_db.saveProgress(mangaId, chapterId, pageIndex));
+    _onProgressChanged?.call();
   }
 
   /// Returns the saved reading position for [mangaId].
@@ -63,6 +95,21 @@ class LocalProgressService {
       unawaited(_db.markChapterRead(mangaId, chapterId));
     }
   }
+
+  /// Marks [mangaId] as finished at [lastChapterId].
+  void finishManga(String mangaId, String lastChapterId) {
+    _finishedChapterByManga[mangaId] = lastChapterId;
+    _lastReadAtByManga[mangaId] = DateTime.now();
+    unawaited(_db.setFinishedChapter(mangaId, lastChapterId));
+  }
+
+  bool isFinished(String mangaId) =>
+      _finishedChapterByManga.containsKey(mangaId);
+
+  String? getFinishedChapter(String mangaId) =>
+      _finishedChapterByManga[mangaId];
+
+  DateTime? getLastReadAt(String mangaId) => _lastReadAtByManga[mangaId];
 
   /// Returns the set of chapter IDs the user has explicitly completed for
   /// [mangaId]. An empty set means no chapters have been fully read yet.
@@ -93,6 +140,8 @@ class LocalProgressService {
   Future<void> clearAllProgress() async {
     _progressByManga.clear();
     _readByManga.clear();
+    _finishedChapterByManga.clear();
+    _lastReadAtByManga.clear();
     await _db.clearProgressData();
   }
 }

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'pages/library_page.dart';
+import 'providers/library_provider.dart';
 import 'pages/manga_detail_page.dart';
 import 'pages/reader_page.dart';
 import 'pages/search_page.dart';
@@ -57,19 +59,19 @@ final goRouter = GoRouter(
   ],
 );
 
-class _ScaffoldWithNavBar extends StatelessWidget {
+class _ScaffoldWithNavBar extends ConsumerWidget {
   const _ScaffoldWithNavBar({required this.child});
 
   final Widget child;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       body: child,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex(context),
         onDestinationSelected: (index) =>
-            _onDestinationSelected(context, index),
+            _onDestinationSelected(context, ref, index),
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.menu_book),
@@ -95,7 +97,10 @@ class _ScaffoldWithNavBar extends StatelessWidget {
     return 0;
   }
 
-  void _onDestinationSelected(BuildContext context, int index) {
+  void _onDestinationSelected(BuildContext context, WidgetRef ref, int index) {
+    if (index == 0) {
+      ref.read(libraryResortTriggerProvider.notifier).update((n) => n + 1);
+    }
     switch (index) {
       case 0:
         context.go('/');

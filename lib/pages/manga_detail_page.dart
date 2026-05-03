@@ -404,6 +404,10 @@ class _ChapterList extends StatelessWidget {
     }
 
     var groups = _groupAndSort(chapters);
+    final latestPreferredChapterNumber = _latestPreferredChapterNumber(
+      chapters,
+      preferredLanguage,
+    );
     if (downloadedOnly) {
       groups = groups
           .where((entry) => entry.value
@@ -428,6 +432,7 @@ class _ChapterList extends StatelessWidget {
             mangaId: mangaId,
             chapters: entry.value,
             preferredLanguage: preferredLanguage,
+            isLatest: latestPreferredChapterNumber == entry.key,
             readState:
                 _readStateFor(entry.value, currentChapterId, readChapterIds),
             onChapterSelected: onChapterSelected,
@@ -479,6 +484,28 @@ class _ChapterList extends StatelessWidget {
       });
 
     return entries;
+  }
+
+  static String? _latestPreferredChapterNumber(
+    List<Chapter> chapters,
+    String preferredLanguage,
+  ) {
+    final preferred = chapters
+        .where((c) => c.attributes.translatedLanguage == preferredLanguage)
+        .toList();
+    if (preferred.isEmpty) return null;
+
+    preferred.sort((a, b) {
+      final aNum = double.tryParse(a.attributes.chapterNumber ?? '');
+      final bNum = double.tryParse(b.attributes.chapterNumber ?? '');
+      if (aNum != null && bNum != null) return aNum.compareTo(bNum);
+      if (a.attributes.chapterNumber == null) return -1;
+      if (b.attributes.chapterNumber == null) return 1;
+      return (a.attributes.chapterNumber ?? '')
+          .compareTo(b.attributes.chapterNumber ?? '');
+    });
+
+    return preferred.last.attributes.chapterNumber;
   }
 }
 

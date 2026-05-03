@@ -57,7 +57,8 @@ void main() {
     }
   }
 
-  testWidgets('bars are hidden by default; tap shows them with settings cog',
+  testWidgets(
+      'bars are visible by default; tap hides them, tap again shows them with settings cog',
       (tester) async {
     app.main();
     await tester.pumpAndSettle();
@@ -68,11 +69,18 @@ void main() {
     await tester.tap(find.text('Ch. 2'));
     await tester.pumpAndSettle();
 
-    // Bars hidden by default.
+    // Bars visible by default.
+    expect(find.byIcon(Icons.arrow_back), findsOneWidget);
+    expect(find.byIcon(Icons.settings), findsOneWidget);
+
+    // Tap to hide bars.
+    await tester.tapAt(const Offset(200, 400));
+    await tester.pump(const Duration(milliseconds: 350));
+
     expect(find.byIcon(Icons.arrow_back), findsNothing);
     expect(find.byIcon(Icons.settings), findsNothing);
 
-    // Tap to reveal bars.
+    // Tap again to show bars.
     await tester.tapAt(const Offset(200, 400));
     await tester.pump(const Duration(milliseconds: 350));
 

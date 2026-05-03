@@ -64,34 +64,35 @@ void main(List<String> args) async {
     exit(widgetCode);
   }
 
-  // ── 3. Integration tests (one file at a time to avoid parallel APK
-  //        installs overwriting each other on the shared device) ────────────
+  // ── 3. Integration tests (single suite run for one global pass/fail
+  //        summary across all integration files) ────────────────────────────
   _log('Running integration tests against mock server…');
-  final testFiles = Directory('integration_test')
-      .listSync()
-      .whereType<File>()
-      .where((f) => f.path.endsWith('_test.dart'))
-      .map((f) => f.path)
-      .toList()
-    ..sort();
+  final integrationCode = await _run([
+    'flutter',
+    'test',
+    'integration_test/',
+    '-r',
+    'expanded',
+    '--dart-define=MOCK_BASE_URL=$mockBaseUrl',
+    '-d',
+    device,
+  ]);
 
-  var integrationCode = 0;
-  for (final file in testFiles) {
-    _log('Running $file');
-    final code = await _run([
-      'flutter',
-      'test',
-      file,
-      '--dart-define=MOCK_BASE_URL=$mockBaseUrl',
-      '-d',
-      device,
-    ]);
-    if (code != 0) integrationCode = code;
+  if (integrationCode == 0) {
+    _log('Integration suite passed.');
+  } else {
+    _log('Integration suite failed. See output above for failing tests.');
   }
 
   // ── 4. Tear down ──────────────────────────────────────────────────────────
   serverProcess.kill();
   _log('Mock server stopped.');
+
+  if (integrationCode == 0) {
+    _log('All test suites passed (widget + integration).');
+  } else {
+    _log('One or more test suites failed.');
+  }
 
   exit(integrationCode);
 }

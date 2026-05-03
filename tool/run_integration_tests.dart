@@ -68,34 +68,24 @@ void main(List<String> args) async {
   final mockBaseUrl = 'http://$hostIp:$port';
   _log('Mock server is up on port $port. App will use: $mockBaseUrl');
 
-  // ── 2. Run integration tests (one file at a time to avoid parallel APK
-  //        installs overwriting each other on the shared device) ─────────────
-  final testFiles = Directory('integration_test')
-      .listSync()
-      .whereType<File>()
-      .where((f) => f.path.endsWith('_test.dart'))
-      .map((f) => f.path)
-      .toList()
-    ..sort();
+  // ── 2. Run integration tests as a single suite so test output has one
+  //        global pass/fail result for all files. ───────────────────────────
+  _log('Running integration test suite (all files in one run)...');
+  final overallExitCode = await _run([
+    'flutter',
+    'test',
+    'integration_test/',
+    '-r',
+    'expanded',
+    '--dart-define=MOCK_BASE_URL=$mockBaseUrl',
+    '-d',
+    device,
+  ]);
 
-  var overallExitCode = 0;
-  for (final file in testFiles) {
-    _log('Running $file');
-    final testProcess = await Process.start(
-      'flutter',
-      [
-        'test',
-        file,
-        '--dart-define=MOCK_BASE_URL=$mockBaseUrl',
-        '-d',
-        device,
-      ],
-      workingDirectory: Directory.current.path,
-    );
-    testProcess.stdout.listen((data) => stdout.add(data));
-    testProcess.stderr.listen((data) => stderr.add(data));
-    final code = await testProcess.exitCode;
-    if (code != 0) overallExitCode = code;
+  if (overallExitCode == 0) {
+    _log('Integration suite passed.');
+  } else {
+    _log('Integration suite failed. See output above for failing tests.');
   }
 
   // ── 3. Tear down the mock server ─────────────────────────────────────────
@@ -106,3 +96,14 @@ void main(List<String> args) async {
 }
 
 void _log(String msg) => stderr.writeln('[runner] $msg');
+
+Future<int> _run(List<String> cmd) async {
+  final process = await Process.start(
+    cmd.first,
+    cmd.skip(1).toList(),
+    workingDirectory: Directory.current.path,
+  );
+  process.stdout.listen((data) => stdout.add(data));
+  process.stderr.listen((data) => stderr.add(data));
+  return process.exitCode;
+}

@@ -219,6 +219,40 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         service.markChapterRead(widget.mangaId!, _currentChapterId);
       }
     });
+
+    _maybeMarkMangaFinished();
+  }
+
+  Future<void> _maybeMarkMangaFinished() async {
+    final mangaId = widget.mangaId;
+    if (mangaId == null) return;
+
+    try {
+      final chapters = await ref.read(chapterFeedProvider(mangaId).future);
+      if (!mounted) return;
+      final preferredLanguage =
+          ref.read(settingsNotifierProvider).preferredLanguage;
+      final preferred = chapters
+          .where((c) => c.attributes.translatedLanguage == preferredLanguage)
+          .toList();
+      if (preferred.isEmpty) return;
+
+      preferred.sort(
+        (a, b) => _compareChapterNums(
+          a.attributes.chapterNumber,
+          b.attributes.chapterNumber,
+        ),
+      );
+
+      final latest = preferred.last;
+      if (latest.id != _currentChapterId) return;
+
+      final service = await ref.read(localProgressServiceProvider.future);
+      if (!mounted) return;
+      service.finishManga(mangaId, _currentChapterId);
+    } catch (_) {
+      // Best effort: chapter completion should never fail due to finish checks.
+    }
   }
 
   // ── Image preloading ───────────────────────────────────────────────────────

@@ -70,9 +70,7 @@ void main() {
     // Verify we're on the reader page showing a PageView with images.
     expect(find.byType(PageView), findsOneWidget);
 
-    // Tap the screen to show info bars, then check the page counter.
-    await tester.tapAt(const Offset(200, 400));
-    await tester.pump(const Duration(milliseconds: 350));
+    // Bars are visible by default; check the page counter directly.
     expect(find.text('1 / 5'), findsOneWidget);
   });
 }

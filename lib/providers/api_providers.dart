@@ -10,6 +10,7 @@ import '../services/download_service.dart';
 import '../services/local_progress.dart';
 import '../services/mangadex_api.dart';
 import 'settings_provider.dart';
+import 'library_provider.dart';
 
 part 'api_providers.g.dart';
 
@@ -33,7 +34,9 @@ AppDatabase appDatabase(Ref ref) {
 @riverpod
 Future<LocalProgressService> localProgressService(Ref ref) async {
   final db = ref.watch(appDatabaseProvider);
-  return LocalProgressService.create(db);
+  return LocalProgressService.createWithCallback(db, () {
+    ref.read(libraryResortTriggerProvider.notifier).update((n) => n + 1);
+  });
 }
 
 @riverpod
@@ -81,6 +84,11 @@ Future<Set<String>> downloadedChapterIdsForManga(Ref ref, String mangaId) {
 @riverpod
 Future<int> downloadedBytesForManga(Ref ref, String mangaId) {
   return ref.watch(downloadServiceProvider).getDownloadedBytesForManga(mangaId);
+}
+
+@riverpod
+Future<Set<String>> mangaIdsWithDownloads(Ref ref) {
+  return ref.watch(downloadServiceProvider).getMangaIdsWithDownloads();
 }
 
 final downloadedOnlyFilterProvider =

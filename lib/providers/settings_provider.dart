@@ -7,12 +7,19 @@ part 'settings_provider.g.dart';
 /// Content rating tiers in ascending order.
 const _ratingOrder = ['safe', 'suggestive', 'erotica', 'pornographic'];
 
+enum ChapterRefreshMode {
+  always,
+  wifiOnly,
+  never,
+}
+
 class Settings {
   const Settings({
     this.preferredLanguage = 'en',
     this.maxContentRating = 'suggestive',
     this.imageQuality = 'data',
     this.themeMode = ThemeMode.dark,
+    this.chapterRefreshMode = ChapterRefreshMode.wifiOnly,
   });
 
   final String preferredLanguage;
@@ -25,6 +32,7 @@ class Settings {
   final String imageQuality;
 
   final ThemeMode themeMode;
+  final ChapterRefreshMode chapterRefreshMode;
 
   /// Returns all content rating tiers up to and including [maxContentRating].
   /// This is the value passed as `contentRating[]` in API calls.
@@ -39,12 +47,14 @@ class Settings {
     String? maxContentRating,
     String? imageQuality,
     ThemeMode? themeMode,
+    ChapterRefreshMode? chapterRefreshMode,
   }) {
     return Settings(
       preferredLanguage: preferredLanguage ?? this.preferredLanguage,
       maxContentRating: maxContentRating ?? this.maxContentRating,
       imageQuality: imageQuality ?? this.imageQuality,
       themeMode: themeMode ?? this.themeMode,
+      chapterRefreshMode: chapterRefreshMode ?? this.chapterRefreshMode,
     );
   }
 }
@@ -55,6 +65,7 @@ class SettingsNotifier extends _$SettingsNotifier {
   static const _prefMaxRating = 'settings_max_content_rating';
   static const _prefQuality = 'settings_image_quality';
   static const _prefTheme = 'settings_theme_mode';
+  static const _prefChapterRefreshMode = 'settings_chapter_refresh_mode';
 
   @override
   Settings build() {
@@ -69,6 +80,8 @@ class SettingsNotifier extends _$SettingsNotifier {
       maxContentRating: prefs.getString(_prefMaxRating) ?? 'suggestive',
       imageQuality: prefs.getString(_prefQuality) ?? 'data',
       themeMode: _parseTheme(prefs.getString(_prefTheme)),
+      chapterRefreshMode:
+          _parseChapterRefreshMode(prefs.getString(_prefChapterRefreshMode)),
     );
   }
 
@@ -99,6 +112,13 @@ class SettingsNotifier extends _$SettingsNotifier {
     await prefs.setString(_prefTheme, _themeToString(mode));
   }
 
+  Future<void> setChapterRefreshMode(ChapterRefreshMode mode) async {
+    state = state.copyWith(chapterRefreshMode: mode);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+        _prefChapterRefreshMode, _chapterRefreshModeToString(mode));
+  }
+
   static ThemeMode _parseTheme(String? value) => switch (value) {
         'light' => ThemeMode.light,
         'system' => ThemeMode.system,
@@ -111,5 +131,19 @@ class SettingsNotifier extends _$SettingsNotifier {
         ThemeMode.dark => 'dark',
         // ignore: unreachable_switch_case
         _ => 'dark',
+      };
+
+  static ChapterRefreshMode _parseChapterRefreshMode(String? value) =>
+      switch (value) {
+        'always' => ChapterRefreshMode.always,
+        'never' => ChapterRefreshMode.never,
+        _ => ChapterRefreshMode.wifiOnly,
+      };
+
+  static String _chapterRefreshModeToString(ChapterRefreshMode mode) =>
+      switch (mode) {
+        ChapterRefreshMode.always => 'always',
+        ChapterRefreshMode.wifiOnly => 'wifi_only',
+        ChapterRefreshMode.never => 'never',
       };
 }
