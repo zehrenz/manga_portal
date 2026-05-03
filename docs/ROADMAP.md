@@ -444,7 +444,7 @@ _All tasks and tests complete. Verified on emulator: real MangaDex search return
 
 ---
 
-## Feature 11 — Library Sections & Update Detection
+## Feature 11 — Library Sections & Update Detection ✅
 
 **Goal**: Organize the library into "Continue Reading" and "The Shelf" sections with automatic detection of newly completed or updated manga, plus visual indicators for download status and new chapters.
 
@@ -462,63 +462,63 @@ _All tasks and tests complete. Verified on emulator: real MangaDex search return
 
 ### Tasks
 
-- [ ] Add `finished_chapter_id` column to the manga progress table in `AppDatabase`:
+- [x] Add `finished_chapter_id` column to the manga progress table in `AppDatabase`:
   - `null` if not marked finished
   - Stores the chapter ID of the last chapter read when the user completes a series
-- [ ] Add to `LocalProgressService`:
+- [x] Add to `LocalProgressService`:
   - `finishManga(mangaId, lastChapterId)` — mark manga as finished
   - `isFinished(mangaId)` → bool
   - `getFinishedChapter(mangaId)` → chapterId
-- [ ] Add to `DownloadService`:
+- [x] Add to `DownloadService`:
   - `checkForUpdates(List<String> mangaIds, {Duration timeout = const Duration(seconds: 30)})` — fetch latest chapter feed for all given manga, compare with finished status, return list of manga IDs that are now "Up" (in preferred language only); store detected updates in a transient in-memory cache for this session
-- [ ] Add "Check for new chapters on launch" setting to `SettingsNotifier`:
+- [x] Add "Check for new chapters on launch" setting to `SettingsNotifier`:
   - Three-state enum: `CheckForUpdates.always`, `CheckForUpdates.wifiOnly`, `CheckForUpdates.never`
   - Default: `CheckForUpdates.wifiOnly`
   - Persisted in `SharedPreferences`
   - Add conditional check for network type on app startup (if `wifiOnly`, skip if on cellular)
-- [ ] Update `LibraryPage`:
+- [x] Update `LibraryPage`:
   - On first build: if setting is not `never`, launch background `checkForUpdates()` for all finished manga
   - Display "Continue Reading" section (in-progress manga sorted by last read date, descending)
   - Display "The Shelf" section (finished manga, sorted by most recent save date, descending)
   - If any manga detected as "Up", show a short-lived toast (2 seconds) at the bottom: "New chapters available" — and reshuffle manga from Shelf back into Continue Reading (respecting last-read-date ordering)
   - If `checkForUpdates` times out or throws, silently ignore (no error toast)
-- [ ] Add visual indicators on `MangaCard`:
+- [x] Add visual indicators on `MangaCard`:
   - **Download indicator** (top right): blue down-arrow icon in a rounded square background, shown if manga has any downloaded chapters
   - **Up indicator** (top left): green up-arrow icon in a rounded square background, shown if manga is "Up" (newly available chapters detected)
   - Both icons should have semi-transparent backgrounds (e.g., 80% opaque) so they are visible over any cover art color
-- [ ] Update detail page chapter list:
+- [x] Update detail page chapter list:
   - When a user finishes the last chapter in their preferred language, automatically mark the manga as finished via `finishManga()`
   - Add a visual indicator next to the last-available chapter (e.g., a checkmark or "Latest" badge) so it's clear when reading the final chapter
-- [ ] Update `SettingsPage`:
+- [x] Update `SettingsPage`:
   - Add segmented button / radio group for "Check for new chapters on launch" with three options: Always / WiFi Only / Never
   - Persist selection immediately and respectfully
 
 ### Tests
 
-- [ ] Widget test: `test/widget/library_organization_test.dart`
+- [x] Widget test: `test/widget/library_organization_test.dart`
   - Library renders two sections: Continue Reading and The Shelf
   - In-progress manga appear in Continue Reading, sorted by last read date (most recent first)
   - Finished manga appear in The Shelf, sorted by most recent save date
   - Download indicator shown on manga with downloaded chapters
   - Up indicator shown on manga detected as "Up"
   - Toast appears when background update check finds new chapters
-- [ ] Widget test: `test/widget/settings_update_check_test.dart`
+- [x] Widget test: `test/widget/settings_update_check_test.dart`
   - Setting dropdown renders all three options and persists selection
   - Default is WiFi Only
-- [ ] Integration test: `integration_test/library_sections_flow_test.dart`
+- [x] Integration test: `integration_test/library_flow_test.dart` (expanded coverage)
   - Add manga to library, read some chapters (not all), verify it appears in Continue Reading
   - Read all chapters of that manga, verify it moves to The Shelf
   - Background check detects new chapters, manga moves back to Continue Reading with toast
 
 ### Extras
 
-- **Deferred**: Sort order selector for "The Shelf" (most recent save, alphabetical, etc.) — can be added in a future iteration once the core structure is stable
-- **Network type detection**: Uses `connectivity_plus` package (or similar) to differentiate WiFi from cellular. If unavailable or detection fails, treat as "always checking" to avoid silently skipping updates
-- **Cache invalidation**: In-session "Up" status cache is cleared on resume (to pick up any manual refresh from settings), but not persisted to disk (fresh check on each app launch)
+- **Library refresh trigger**: Added a `libraryResortTriggerProvider` that is bumped on library tab selection and progress writes, ensuring section ordering refreshes immediately when users return from the reader.
+- **Download badge plumbing**: Added a dedicated `mangaIdsWithDownloadsProvider` that maps completed download jobs to manga IDs and cleanly drives the card-level download badge display in `LibraryPage`.
+- **Chapter-list end-state visibility**: Added both a "Latest" marker and a read check icon in chapter rows so users can more easily identify the current endpoint and completed chapters while browsing detail pages.
 
 ---
 
-## Feature 12 — Explore Page & Discovery Lists
+## Feature 12 — Explore Page & Discovery Lists 🚧 (In Progress)
 
 **Goal**: Replace the current Search tab with an Explore experience that still supports direct title search, but also exposes browse entry points for genres and curated discovery lists when the search field is empty.
 
